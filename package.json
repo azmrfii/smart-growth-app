@@ -5,7 +5,6 @@
   "description": "Minimal Agent-Native app.",
   "type": "module",
   "scripts": {
-    "migrate:production": "tsx scripts/migrate-production.ts && pnpm db:migrate",
     "dev": "agent-native dev",
     "build": "agent-native build",
     "start": "agent-native start",
