@@ -41,3 +41,25 @@ learnings.md
 .vercel/
 .agent-native/
 data/*.lock
+
+# AI agent / coding assistant tooling (not used by the app at runtime)
+.claude/
+CLAUDE.md
+.agents/
+AGENTS.md
+.mcp.json
+.ignore
+.cursor/
+.cursorrules
+.windsurf/
+.windsurfrules
+.gemini/
+GEMINI.md
+.github/copilot-instructions.md
+DEVELOPING.md
+DESIGN.md
+learnings.defaults.md
+builder.config.json
+
+# Unused root duplicate (app reads app/data/users.json)
+/users.json
