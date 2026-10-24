@@ -63,3 +63,13 @@ builder.config.json
 
 # Unused root duplicate (app reads app/data/users.json)
 /users.json
+
+# Starter tests & example files (not used by the app)
+/tests/
+**/*.spec.ts
+vitest.config.ts
+vitest.config.spec.ts
+actions/hello.ts
+drizzle/START_HERE.md
+drizzle/crud-action-example.ts
+scripts/maybe-migrate.mjs
