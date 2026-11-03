@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "agent-native dev",
+    "dev:vite": "react-router dev",
     "build": "agent-native build",
     "start": "agent-native start",
     "typecheck": "agent-native typecheck",

@@ -17,6 +17,7 @@ import { Navigate, useNavigate } from "react-router";
 
 import { useAppStore } from "@/lib/nutrition-store";
 import { USERS, validateLogin, type UserCredential } from "@/lib/users";
+import { SmartGrowthAPI } from "@/lib/api-client";
 
 export function meta() {
   return [{ title: "Masuk - Sistem Manajemen Gizi Anak" }];
@@ -62,10 +63,28 @@ export default function MasukRoute() {
     navigate(user.defaultPage, { replace: true });
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!username.trim() || !password) {
       setError("Username dan password wajib diisi.");
+      return;
+    }
+
+    // Attempt login with Laravel Backend API first
+    const apiRes = await SmartGrowthAPI.login(username, password);
+    if (apiRes && apiRes.success && apiRes.data) {
+      if (typeof window !== "undefined") {
+        localStorage.setItem("smart_growth_token", apiRes.data.token);
+      }
+      login({
+        id: apiRes.data.user.id,
+        username: apiRes.data.user.username,
+        name: apiRes.data.user.name,
+        role: apiRes.data.user.role,
+        avatarInitials: apiRes.data.user.avatarInitials,
+        defaultPage: apiRes.data.user.defaultPage,
+      });
+      navigate(apiRes.data.user.defaultPage, { replace: true });
       return;
     }
 

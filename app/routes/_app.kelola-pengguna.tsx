@@ -9,10 +9,11 @@ import {
   IconUserCheck,
   IconUserShield,
 } from "@tabler/icons-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { ConfirmDialog, Modal } from "@/components/app-shell/Modal";
 import { useAppStore } from "@/lib/nutrition-store";
+import { SmartGrowthAPI } from "@/lib/api-client";
 
 export function meta() {
   return [{ title: "Kelola Pengguna - Sistem Gizi" }];
@@ -89,6 +90,14 @@ export default function KelolaPenggunaRoute() {
 
   const notify = useAppStore((state) => state.notify);
 
+  useEffect(() => {
+    SmartGrowthAPI.getUsers().then((res) => {
+      if (res && res.success && Array.isArray(res.data) && res.data.length > 0) {
+        setUsers(res.data);
+      }
+    });
+  }, []);
+
   const filteredUsers = users.filter((u) => {
     const matchesSearch =
       u.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -120,6 +129,12 @@ export default function KelolaPenggunaRoute() {
     if (!formName.trim() || !formUsername.trim()) return;
 
     if (editingUser) {
+      const updatePayload = {
+        name: formName.trim(),
+        username: formUsername.trim(),
+        role: formRole,
+        password: formPassword || undefined,
+      };
       setUsers((prev) =>
         prev.map((u) =>
           u.id === editingUser.id
@@ -138,8 +153,15 @@ export default function KelolaPenggunaRoute() {
             : u,
         ),
       );
+      SmartGrowthAPI.updateUser(editingUser.id, updatePayload).catch(() => {});
       notify("Pengguna Diperbarui", `Data pengguna ${formName} berhasil disimpan.`);
     } else {
+      const newUserData = {
+        name: formName.trim(),
+        username: formUsername.trim(),
+        role: formRole,
+        password: formPassword || "password123",
+      };
       const newUser: ManagedUser = {
         id: `usr-${Date.now()}`,
         name: formName.trim(),
@@ -159,6 +181,11 @@ export default function KelolaPenggunaRoute() {
         }),
       };
       setUsers((prev) => [newUser, ...prev]);
+      SmartGrowthAPI.addUser(newUserData).then((res) => {
+        if (res && res.data) {
+          setUsers((prev) => prev.map((u) => (u.username === newUserData.username ? { ...u, id: res.data.id } : u)));
+        }
+      }).catch(() => {});
       notify("Pengguna Ditambahkan", `Pengguna ${formName} berhasil didaftarkan ke sistem.`);
     }
 
@@ -167,7 +194,9 @@ export default function KelolaPenggunaRoute() {
 
   const handleDelete = () => {
     if (!userToDelete) return;
-    setUsers((prev) => prev.filter((u) => u.id !== userToDelete.id));
+    const toDeleteId = userToDelete.id;
+    setUsers((prev) => prev.filter((u) => u.id !== toDeleteId));
+    SmartGrowthAPI.deleteUser(toDeleteId).catch(() => {});
     notify("Pengguna Dihapus", `Pengguna ${userToDelete.name} telah dinonaktifkan dari sistem.`);
     setUserToDelete(null);
   };

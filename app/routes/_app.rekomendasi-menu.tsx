@@ -11,9 +11,10 @@ import {
   IconTrash,
   IconX,
 } from "@tabler/icons-react";
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { ConfirmDialog, Modal } from "@/components/app-shell/Modal";
+import { SmartGrowthAPI } from "@/lib/api-client";
 import {
   createEmptyDayMenu,
   DAYS,
@@ -284,6 +285,20 @@ export default function RekomendasiMenuRoute() {
   const [viewDay, setViewDay] = useState<Day>("Senin");
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
+  useEffect(() => {
+    SmartGrowthAPI.getFoods().then((res) => {
+      if (res && res.success && Array.isArray(res.data) && res.data.length > 0) {
+        useAppStore.setState({ foods: res.data });
+      }
+    });
+
+    SmartGrowthAPI.getMenus().then((res) => {
+      if (res && res.success && Array.isArray(res.data) && res.data.length > 0) {
+        useAppStore.setState({ menus: res.data });
+      }
+    });
+  }, []);
+
   const foodsById = useMemo(() => new Map(foods.map((food) => [food.id, food])), [foods]);
   const drafts = menus.filter((menu) => menu.status === "draft");
   const submitted = menus.filter((menu) => menu.status === "submitted");
@@ -313,6 +328,7 @@ export default function RekomendasiMenuRoute() {
   const handleSaveDraft = () => {
     const id = saveDraft({ id: builder.id, days: builder.days });
     setBuilder((current) => ({ ...current, id }));
+    SmartGrowthAPI.saveDraftMenu({ id, days: builder.days }).catch(() => {});
     notify("Notification", "Draft menu berhasil disimpan");
   };
 
@@ -333,6 +349,7 @@ export default function RekomendasiMenuRoute() {
 
   const handleSubmitDraft = (menu: WeeklyMenu) => {
     submitMenu(menu.id);
+    SmartGrowthAPI.approveMenu(menu.id).catch(() => {});
     if (builder.id === menu.id) setBuilder({ days: createEmptyDayMenu() });
   };
 

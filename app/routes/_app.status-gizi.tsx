@@ -1,7 +1,8 @@
 import { IconSearch } from "@tabler/icons-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useAppStore } from "@/lib/nutrition-store";
+import { SmartGrowthAPI } from "@/lib/api-client";
 import {
   NUTRITION_STATUS_STYLES,
   NUTRITION_STATUSES,
@@ -21,6 +22,14 @@ export default function StatusGiziRoute() {
   const kids = useAppStore((state) => state.kids);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("Semua");
+
+  useEffect(() => {
+    SmartGrowthAPI.getKids().then((res) => {
+      if (res && res.success && Array.isArray(res.data) && res.data.length > 0) {
+        useAppStore.setState({ kids: res.data });
+      }
+    });
+  }, []);
 
   const total = kids.length;
 

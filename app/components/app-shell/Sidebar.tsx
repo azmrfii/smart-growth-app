@@ -11,6 +11,7 @@ import {
 import { NavLink, useNavigate } from "react-router";
 
 import { useAppStore } from "@/lib/nutrition-store";
+import { SmartGrowthAPI } from "@/lib/api-client";
 
 type NavItem = {
   to: string;
@@ -73,6 +74,10 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const displayInitials = currentUser?.avatarInitials || "DV";
 
   const handleLogout = () => {
+    SmartGrowthAPI.logout().catch(() => {});
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("smart_growth_token");
+    }
     logout();
     navigate("/masuk", { replace: true });
   };

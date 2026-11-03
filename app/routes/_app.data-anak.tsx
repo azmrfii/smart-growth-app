@@ -5,11 +5,12 @@ import {
   IconSearch,
   IconTrash,
 } from "@tabler/icons-react";
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { ConfirmDialog, Modal } from "@/components/app-shell/Modal";
 import { GENDERS, useAppStore, type Gender, type Kid, type KidInput } from "@/lib/nutrition-store";
 import { NUTRITION_STATUSES, type NutritionStatus } from "@/lib/nutrition-status";
+import { SmartGrowthAPI } from "@/lib/api-client";
 
 export function meta() {
   return [{ title: "Data Anak - Sistem Gizi" }];
@@ -63,6 +64,14 @@ export default function DataAnakRoute() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [formError, setFormError] = useState("");
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+
+  useEffect(() => {
+    SmartGrowthAPI.getKids().then((res) => {
+      if (res && res.success && Array.isArray(res.data) && res.data.length > 0) {
+        useAppStore.setState({ kids: res.data });
+      }
+    });
+  }, []);
 
   const filteredKids = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -142,9 +151,17 @@ export default function DataAnakRoute() {
 
     if (editingKid) {
       updateKid(editingKid.id, kidData);
+      SmartGrowthAPI.updateKid(editingKid.id, kidData).catch(() => {});
       notify("Data Diperbarui", `Data ${form.name} berhasil diperbarui`);
     } else {
       addKid(kidData);
+      SmartGrowthAPI.addKid(kidData).then((res) => {
+        if (res && res.data) {
+          useAppStore.setState((s) => ({
+            kids: s.kids.map((k) => (k.name === kidData.name ? { ...k, id: res.data.id } : k)),
+          }));
+        }
+      }).catch(() => {});
       notify("Data Ditambahkan", `Data anak ${form.name} berhasil ditambahkan`);
     }
 
@@ -473,6 +490,7 @@ export default function DataAnakRoute() {
           onCancel={() => setPendingDeleteId(null)}
           onConfirm={() => {
             deleteKid(pendingDelete.id);
+            SmartGrowthAPI.deleteKid(pendingDelete.id).catch(() => {});
             notify("Data Dihapus", `Data anak ${pendingDelete.name} berhasil dihapus`);
             setPendingDeleteId(null);
           }}

@@ -9,9 +9,10 @@ import {
   IconSalad,
   IconToolsKitchen2,
 } from "@tabler/icons-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useAppStore } from "@/lib/nutrition-store";
+import { SmartGrowthAPI } from "@/lib/api-client";
 
 export function meta() {
   return [{ title: "Laporan Final Menu - Dapur MBG" }];
@@ -114,10 +115,20 @@ const JADWAL_MASAK_MINGGUAN = [
 ];
 
 export default function LaporanMenuRoute() {
-  const [reports] = useState<MenuReport[]>(INITIAL_REPORTS);
+  const [reports, setReports] = useState<MenuReport[]>(INITIAL_REPORTS);
   const notify = useAppStore((state) => state.notify);
 
+  useEffect(() => {
+    SmartGrowthAPI.getLaporanMenu().then((res) => {
+      if (res && res.success && Array.isArray(res.reports) && res.reports.length > 0) {
+        setReports(res.reports);
+      }
+    });
+  }, []);
+
   const handleDownloadPdf = (fileName: string) => {
+    // If backend is running, open the printable HTML / PDF
+    window.open("http://127.0.0.1:8000/api/laporan-menu/rep-1/pdf", "_blank");
     notify("Mengunduh Laporan", `File ${fileName} sedang diunduh.`);
   };
 
