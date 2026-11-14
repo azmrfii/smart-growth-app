@@ -134,7 +134,22 @@ class UserController extends Controller
             $user->status = $validated['status'];
         }
 
+        // [KEAMANAN] Super Admin tidak boleh menonaktifkan / menurunkan role akunnya sendiri.
+        if ($request->user() && $user->id_user === $request->user()->id_user
+            && ($user->role !== 'Super Admin' || $user->status !== 'Aktif')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Anda tidak dapat menonaktifkan atau mengubah role akun Anda sendiri.',
+            ], 422);
+        }
+
         $user->save();
+
+        // [KEAMANAN] Jika role, status, atau password berubah, paksa pengguna login ulang
+        // (semua token lamanya dihapus) agar hak aksesnya langsung mengikuti data terbaru.
+        if ($user->wasChanged(['role', 'status', 'password'])) {
+            $user->tokens()->delete();
+        }
 
         AuditLog::record(
             'EDIT_PENGGUNA',
@@ -166,9 +181,19 @@ class UserController extends Controller
         $idUser = is_numeric($id) ? $id : (int) str_replace('usr-', '', $id);
         $user = User::findOrFail($idUser);
 
+        // [KEAMANAN] Super Admin tidak boleh menghapus akunnya sendiri.
+        if ($request->user() && $user->id_user === $request->user()->id_user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Anda tidak dapat menghapus akun Anda sendiri.',
+            ], 422);
+        }
+
         $user->status = 'Deleted';
-        $user->api_token = null;
         $user->save();
+
+        // [KEAMANAN] Hapus semua token milik pengguna ini -> langsung ter-logout.
+        $user->tokens()->delete();
 
         AuditLog::record(
             'HAPUS_PENGGUNA',

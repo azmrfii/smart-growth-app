@@ -30,10 +30,31 @@ CREATE TABLE `users` (
 
 -- Initial Users (Password: password123 via bcrypt)
 INSERT INTO `users` (`id_user`, `name`, `username`, `password`, `role`, `status`, `avatar_initials`, `default_page`, `created_at`, `updated_at`) VALUES
-(1, 'Dimas Vikriansyah', 'dimas_vikrian', '$2y$12$lO/ZqOa8dYp9MfqFh3sD.uWjXgO/6o2r4c1l1s5.wN4wPqBvY2uC.', 'Super Admin', 'Aktif', 'DV', '/kelola-pengguna', NOW(), NOW()),
-(2, 'Siti Aminah', 'siti_aminah', '$2y$12$lO/ZqOa8dYp9MfqFh3sD.uWjXgO/6o2r4c1l1s5.wN4wPqBvY2uC.', 'Tata Usaha', 'Aktif', 'SA', '/data-anak', NOW(), NOW()),
-(3, 'Dr. Ratna Dewi', 'ratna_dewi', '$2y$12$lO/ZqOa8dYp9MfqFh3sD.uWjXgO/6o2r4c1l1s5.wN4wPqBvY2uC.', 'Ahli Gizi', 'Aktif', 'RD', '/rekomendasi-menu', NOW(), NOW()),
-(4, 'Budi Santoso', 'budi_santoso', '$2y$12$lO/ZqOa8dYp9MfqFh3sD.uWjXgO/6o2r4c1l1s5.wN4wPqBvY2uC.', 'Admin dapur MBG', 'Aktif', 'BS', '/laporan-menu', NOW(), NOW());
+(1, 'Dimas Vikriansyah', 'dimas_vikrian', '$2y$12$8GG8BSyvrPHly55HwyRGcOGqeqyLWSg/B1pMNbVy1xw5XVPFWkeES', 'Super Admin', 'Aktif', 'DV', '/kelola-pengguna', NOW(), NOW()),
+(2, 'Siti Aminah', 'siti_aminah', '$2y$12$8GG8BSyvrPHly55HwyRGcOGqeqyLWSg/B1pMNbVy1xw5XVPFWkeES', 'Tata Usaha', 'Aktif', 'SA', '/data-anak', NOW(), NOW()),
+(3, 'Dr. Ratna Dewi', 'ratna_dewi', '$2y$12$8GG8BSyvrPHly55HwyRGcOGqeqyLWSg/B1pMNbVy1xw5XVPFWkeES', 'Ahli Gizi', 'Aktif', 'RD', '/rekomendasi-menu', NOW(), NOW()),
+(4, 'Budi Santoso', 'budi_santoso', '$2y$12$8GG8BSyvrPHly55HwyRGcOGqeqyLWSg/B1pMNbVy1xw5XVPFWkeES', 'Admin dapur MBG', 'Aktif', 'BS', '/laporan-menu', NOW(), NOW());
+
+-- --------------------------------------------------------
+-- Table: personal_access_tokens (Token login Laravel Sanctum)
+-- Menyimpan hash token setiap kali pengguna login; dihapus saat logout.
+-- --------------------------------------------------------
+DROP TABLE IF EXISTS `personal_access_tokens`;
+CREATE TABLE `personal_access_tokens` (
+  `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `tokenable_type` varchar(255) NOT NULL,
+  `tokenable_id` bigint(20) UNSIGNED NOT NULL,
+  `name` varchar(255) NOT NULL,
+  `token` varchar(64) NOT NULL,
+  `abilities` text DEFAULT NULL,
+  `last_used_at` timestamp NULL DEFAULT NULL,
+  `expires_at` timestamp NULL DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `personal_access_tokens_token_unique` (`token`),
+  KEY `personal_access_tokens_tokenable_type_tokenable_id_index` (`tokenable_type`,`tokenable_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
 -- Table: standard_gizi (CL-03 StandardGizi - WHO Z-Score 3-7 Tahun)
