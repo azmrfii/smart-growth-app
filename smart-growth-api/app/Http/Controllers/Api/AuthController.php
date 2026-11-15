@@ -8,7 +8,6 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Str;
 
 class AuthController extends Controller
 {
@@ -28,15 +27,13 @@ class AuthController extends Controller
 
         $user = User::where('username', $username)->first();
 
-        // Check if user exists and password matches
+        // [KEAMANAN] Password hanya dicocokkan dengan hash bcrypt.
+        // Sebelumnya ada "fallback" yang menerima password teks biasa, sudah dihapus.
         if (!$user || !Hash::check($password, $user->password)) {
-            // Check fallback for plaintext if newly imported or test
-            if (!$user || $user->password !== $password) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Username atau password tidak valid. Silakan coba lagi.',
-                ], 401);
-            }
+            return response()->json([
+                'success' => false,
+                'message' => 'Username atau password tidak valid. Silakan coba lagi.',
+            ], 401);
         }
 
         // Check user active status
@@ -47,10 +44,11 @@ class AuthController extends Controller
             ], 403);
         }
 
-        // Generate or assign token
-        $token = Str::random(60);
-        $user->api_token = hash('sha256', $token);
-        $user->save();
+        // [KEAMANAN] Buat token login dengan Laravel Sanctum.
+        // Token disimpan (dalam bentuk hash) di tabel personal_access_tokens,
+        // lalu frontend mengirimnya di header "Authorization: Bearer <token>"
+        // pada setiap request berikutnya.
+        $token = $user->createToken('smart-growth-frontend')->plainTextToken;
 
         // Audit Trail
         AuditLog::record(
@@ -92,8 +90,9 @@ class AuthController extends Controller
         $user = $request->user();
 
         if ($user) {
-            $user->api_token = null;
-            $user->save();
+            // [KEAMANAN] Hapus token yang sedang dipakai, sehingga token itu
+            // tidak bisa dipakai lagi walaupun dicuri/disalin.
+            $user->currentAccessToken()?->delete();
 
             AuditLog::record(
                 'LOGOUT',

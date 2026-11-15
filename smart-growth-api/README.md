@@ -53,19 +53,57 @@ DB_PASSWORD=
 
 ## 🚀 Cara Menjalankan API Server
 
-### Opsi A (Menggunakan Standalone Server - Tanpa Composer Install):
+### Opsi A (Standalone Server) — ⚠️ hanya untuk darurat, TIDAK ada pengecekan login/role:
 Jika Composer atau OpenSSL CA di PHP lokal Anda belum tersetting, Anda bisa langsung menjalankan server API menggunakan router standalone bawaan yang langsung terhubung ke MySQL:
 ```bash
 php -S 127.0.0.1:8000 standalone_api_server.php
 ```
 
-### Opsi B (Standar Laravel):
+### Opsi B (Standar Laravel) — ✅ dipakai untuk demo & presentasi:
 ```bash
+cp .env.example .env
 composer install
 php artisan key:generate
-php artisan migrate --seed
-php artisan serve
+php artisan migrate --seed      # atau import database/smart_growth.sql
+php artisan serve               # http://127.0.0.1:8000/api/ping
+php artisan test                # menjalankan 12 tes keamanan
 ```
+
+---
+
+## 🔐 Keamanan: Login & Hak Akses per Role
+
+Alur yang diterapkan (FR-01, FR-11, SKPL CI-01-D):
+
+```
+1. POST /api/login  (username + password)
+       └─ password dicek dengan hash bcrypt
+       └─ jika benar -> server membuat TOKEN (Laravel Sanctum) -> dikirim ke frontend
+2. Frontend menyimpan token, lalu setiap request mengirim header:
+       Authorization: Bearer <token>
+3. Setiap request dicek 2 lapis di routes/api.php:
+       auth:sanctum  -> token valid?        tidak -> 401 "Silakan login kembali"
+       role:...      -> role diizinkan?     tidak -> 403 "Akses ditolak"
+4. POST /api/logout -> token dihapus, tidak bisa dipakai lagi
+```
+
+| Role | Boleh mengakses |
+|---|---|
+| Super Admin | Kelola Pengguna |
+| Tata Usaha | Data Anak (tambah/edit/hapus) |
+| Ahli Gizi | Standar Gizi, Status Gizi, Rekomendasi Menu, lihat Laporan |
+| Admin dapur MBG | Laporan Menu, Status Gizi |
+| Semua role | Melihat daftar anak, profil sendiri, sidebar, logout |
+
+Aturan tambahan:
+- Login dibatasi **10 percobaan per menit** (mencegah tebak password) -> 429.
+- Pengguna yang **dihapus/dinonaktifkan** atau **diganti role/password-nya** langsung ter-logout (semua tokennya dihapus).
+- Super Admin tidak bisa menghapus/menonaktifkan akunnya sendiri.
+- Password teks biasa tidak lagi diterima; hanya hash bcrypt.
+
+Batasan yang masih ada: `GET /api/laporan-menu/{id}/pdf` masih publik karena frontend membukanya dengan
+`window.open()` yang tidak bisa mengirim token. Isinya hanya jadwal menu (tanpa data anak).
+Pengembangan berikutnya: frontend mengunduh PDF lewat `fetch` + token.
 
 ---
 
