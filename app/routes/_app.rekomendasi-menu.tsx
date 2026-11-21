@@ -15,6 +15,8 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { ConfirmDialog, Modal } from "@/components/app-shell/Modal";
 import { SmartGrowthAPI } from "@/lib/api-client";
+import { FieldError, fieldProps } from "@/components/app-shell/FieldError";
+import { hasErrors, parseNumber, validateFoodForm, type FieldErrors, type FoodFields } from "@/lib/validation";
 import {
   createEmptyDayMenu,
   DAYS,
@@ -53,7 +55,7 @@ const OUTLINE_BUTTON =
 const PRIMARY_BUTTON =
   "flex h-9 items-center gap-2 rounded-lg bg-[#0891B2] px-4 text-sm text-white hover:bg-[#0E7490]";
 const INPUT_CLASS =
-  "h-10 w-full rounded-lg border border-black/10 bg-white px-3 text-sm text-[#0A0A0A] outline-none placeholder:text-[#B3B3B3] focus:border-[#0891B2]";
+  "h-10 w-full rounded-lg border border-black/10 bg-white px-3 text-sm text-[#0A0A0A] outline-none placeholder:text-[#B3B3B3] focus:border-[#0891B2] aria-[invalid=true]:border-[#E7000B] aria-[invalid=true]:bg-red-50/40";
 
 const round1 = (value: number) => Math.round(value * 10) / 10;
 
@@ -184,26 +186,29 @@ function AddFoodDialog({ day, onAddFood, onClose }: { day: Day; onAddFood: (food
   const [protein, setProtein] = useState("");
   const [carbs, setCarbs] = useState("");
   const [fat, setFat] = useState("");
-  const [error, setError] = useState("");
+  const [errors, setErrors] = useState<FieldErrors<FoodFields>>({});
+  const bind = (field: FoodFields, setter: (v: string) => void) => ({
+    ...fieldProps(`food-${field}`, errors[field]),
+    onChange: (event: { target: { value: string } }) => {
+      setter(event.target.value);
+      setErrors((c) => (c[field] ? { ...c, [field]: undefined } : c));
+    },
+  });
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (existingId) {
+      if (!foods.some((food) => food.id === existingId)) return;
       onAddFood(existingId);
       notify("Notification", `Bahan ditambahkan ke menu ${day}`);
       return;
     }
-    const values = [calories, protein, carbs, fat].map(Number);
-    if (!name.trim()) {
-      setError("Nama makanan wajib diisi.");
-      return;
-    }
-    if ([calories, protein, carbs, fat].some((value) => value.trim() === "") || values.some((value) => Number.isNaN(value) || value < 0)) {
-      setError("Kalori, protein, karbo, dan lemak harus berupa angka.");
-      return;
-    }
+    const found = validateFoodForm({ name, calories, protein, carbs, fat }, foods.map((food) => food.name));
+    setErrors(found);
+    if (hasErrors(found)) return;
+    const values = [calories, protein, carbs, fat].map((v) => parseNumber(v) as number);
     const input: FoodInput = {
-      name: name.trim(),
+      name: name.trim().replace(/\s+/g, " "),
       calories: values[0],
       protein: values[1],
       carbs: values[2],
@@ -216,7 +221,7 @@ function AddFoodDialog({ day, onAddFood, onClose }: { day: Day; onAddFood: (food
 
   return (
     <Modal title="Tambah Bahan" description={`Tambahkan bahan makanan ke menu hari ${day}`} onClose={onClose}>
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+      <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
         <label className="flex flex-col gap-2">
           <span className="text-xs font-bold text-[#1E1E1E]">Pilih dari database</span>
           <select className={INPUT_CLASS} value={existingId} onChange={(event) => setExistingId(event.target.value)}>
@@ -232,27 +237,31 @@ function AddFoodDialog({ day, onAddFood, onClose }: { day: Day; onAddFood: (food
         <fieldset disabled={Boolean(existingId)} className="grid grid-cols-1 gap-4 disabled:opacity-50 sm:grid-cols-2">
           <label className="flex flex-col gap-2 sm:col-span-2">
             <span className="text-xs font-bold text-[#1E1E1E]">Nama makanan</span>
-            <input className={INPUT_CLASS} value={name} onChange={(event) => setName(event.target.value)} placeholder="Masukkan nama makanan" />
+            <input className={INPUT_CLASS} maxLength={50} value={name} {...bind("name", setName)} placeholder="Masukkan nama makanan" />
+            <FieldError id="food-name-error" message={errors.name} />
           </label>
           <label className="flex flex-col gap-2">
             <span className="text-xs font-bold text-[#1E1E1E]">Kalori</span>
-            <input className={INPUT_CLASS} type="number" min="0" value={calories} onChange={(event) => setCalories(event.target.value)} placeholder="Masukkan jumlah kalori" />
+            <input className={INPUT_CLASS} type="number" inputMode="decimal" min="0" max="2000" value={calories} {...bind("calories", setCalories)} placeholder="Masukkan jumlah kalori" />
+            <FieldError id="food-calories-error" message={errors.calories} />
           </label>
           <label className="flex flex-col gap-2">
             <span className="text-xs font-bold text-[#1E1E1E]">Protein (g)</span>
-            <input className={INPUT_CLASS} type="number" min="0" step="0.1" value={protein} onChange={(event) => setProtein(event.target.value)} placeholder="Masukkan jumlah protein" />
+            <input className={INPUT_CLASS} type="number" inputMode="decimal" min="0" max="500" step="0.1" value={protein} {...bind("protein", setProtein)} placeholder="Masukkan jumlah protein" />
+            <FieldError id="food-protein-error" message={errors.protein} />
           </label>
           <label className="flex flex-col gap-2">
             <span className="text-xs font-bold text-[#1E1E1E]">Karbo (g)</span>
-            <input className={INPUT_CLASS} type="number" min="0" step="0.1" value={carbs} onChange={(event) => setCarbs(event.target.value)} placeholder="Masukkan jumlah karbohidrat" />
+            <input className={INPUT_CLASS} type="number" inputMode="decimal" min="0" max="500" step="0.1" value={carbs} {...bind("carbs", setCarbs)} placeholder="Masukkan jumlah karbohidrat" />
+            <FieldError id="food-carbs-error" message={errors.carbs} />
           </label>
           <label className="flex flex-col gap-2">
             <span className="text-xs font-bold text-[#1E1E1E]">Lemak (g)</span>
-            <input className={INPUT_CLASS} type="number" min="0" step="0.1" value={fat} onChange={(event) => setFat(event.target.value)} placeholder="Masukkan jumlah lemak" />
+            <input className={INPUT_CLASS} type="number" inputMode="decimal" min="0" max="500" step="0.1" value={fat} {...bind("fat", setFat)} placeholder="Masukkan jumlah lemak" />
+            <FieldError id="food-fat-error" message={errors.fat} />
           </label>
         </fieldset>
 
-        {error ? <p className="text-sm text-[#E7000B]">{error}</p> : null}
 
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="h-9 rounded-lg border border-black/10 bg-white px-4 text-sm text-[#0A0A0A] hover:bg-black/5">

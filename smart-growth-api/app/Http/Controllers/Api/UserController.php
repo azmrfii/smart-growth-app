@@ -5,12 +5,68 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
 use App\Models\User;
+use App\Services\OtpService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rule;
 
 class UserController extends Controller
 {
+    private const ROLES = ['Super Admin', 'Tata Usaha', 'Admin dapur MBG', 'Ahli Gizi'];
+
+    private const MESSAGES = [
+        'name.required' => 'Nama lengkap wajib diisi.',
+        'name.min' => 'Nama lengkap minimal 3 karakter.',
+        'name.max' => 'Nama lengkap maksimal 100 karakter.',
+        'name.regex' => 'Nama lengkap hanya boleh berisi huruf, spasi, titik, apostrof, dan tanda hubung.',
+        'username.required' => 'Username wajib diisi.',
+        'username.min' => 'Username minimal 5 karakter.',
+        'username.max' => 'Username maksimal 30 karakter.',
+        'username.regex' => 'Username hanya boleh huruf kecil, angka, titik (.), dan garis bawah (_), tanpa spasi.',
+        'username.unique' => 'Username sudah digunakan oleh akun lain.',
+        'email.required' => 'Email wajib diisi.',
+        'email.email' => 'Format email tidak valid.',
+        'email.max' => 'Email maksimal 254 karakter.',
+        'email.unique' => 'Email sudah digunakan oleh akun lain.',
+        'password.required' => 'Password wajib diisi.',
+        'password.min' => 'Password minimal 8 karakter.',
+        'password.max' => 'Password maksimal 72 karakter.',
+        'password.regex' => 'Password harus mengandung huruf dan angka, tanpa spasi.',
+        'role.required' => 'Peran wajib dipilih.',
+        'role.in' => 'Peran tidak valid.',
+        'status.in' => 'Status tidak valid.',
+    ];
+
+    /** Rapikan masukan sebelum divalidasi (trim; email -> huruf kecil). */
+    private function normalize(Request $request): void
+    {
+        $clean = [];
+        foreach (['name', 'username', 'email'] as $key) {
+            if ($request->has($key) && is_string($request->input($key))) {
+                $value = trim($request->input($key));
+                $clean[$key] = $key === 'email' ? strtolower($value) : ($key === 'name' ? preg_replace('/\s+/', ' ', $value) : $value);
+            }
+        }
+        $request->merge($clean);
+    }
+
+    private function userPayload(User $u): array
+    {
+        return [
+            'id' => "usr-{$u->id_user}",
+            'id_user' => $u->id_user,
+            'name' => $u->name,
+            'username' => $u->username,
+            'email' => $u->email,
+            'role' => $u->role,
+            'status' => $u->status,
+            'initials' => $u->avatar_initials ?: strtoupper(substr($u->name, 0, 2)),
+            'createdAt' => $u->created_at ? $u->created_at->translatedFormat('d M Y') : '10 Jan 2025',
+        ];
+    }
+
     /**
      * Use Case #8: Kelola Pengguna (FR-10) - List users
      */
@@ -30,18 +86,7 @@ class UserController extends Controller
             $query->where('role', $request->role);
         }
 
-        $users = $query->orderBy('name')->get()->map(function ($u) {
-            return [
-                'id' => "usr-{$u->id_user}",
-                'id_user' => $u->id_user,
-                'name' => $u->name,
-                'username' => $u->username,
-                'role' => $u->role,
-                'status' => $u->status,
-                'initials' => $u->avatar_initials ?: strtoupper(substr($u->name, 0, 2)),
-                'createdAt' => $u->created_at ? $u->created_at->translatedFormat('d M Y') : '10 Jan 2025',
-            ];
-        });
+        $users = $query->orderBy('name')->get()->map(fn ($u) => $this->userPayload($u));
 
         return response()->json([
             'success' => true,
@@ -59,29 +104,45 @@ class UserController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        $this->normalize($request);
+
         $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'username' => 'required|string|min:5|unique:users,username|regex:/^\S*$/',
-            'password' => 'required|string|min:8',
-            'role' => 'required|in:Super Admin,Tata Usaha,Admin dapur MBG,Ahli Gizi',
-        ], [
-            'username.regex' => 'Username tidak boleh mengandung spasi.',
-            'username.min' => 'Username minimal 5 karakter.',
-            'password.min' => 'Password minimal 8 karakter.',
-            'username.unique' => 'Username sudah digunakan oleh akun lain.',
-        ]);
+            'name' => ['required', 'string', 'min:3', 'max:100', "regex:/^[\\pL][\\pL .'-]*$/u"],
+            'username' => ['required', 'string', 'min:5', 'max:30', 'regex:/^[a-z0-9._]+$/', 'unique:users,username'],
+            'email' => ['required', 'string', 'max:254', 'email:rfc', 'unique:users,email'],
+            'password' => ['required', 'string', 'min:8', 'max:72', 'regex:/^(?=.*[A-Za-z])(?=.*\\d)\\S+$/'],
+            'role' => ['required', Rule::in(self::ROLES)],
+        ], self::MESSAGES);
 
         $initials = strtoupper(substr($validated['name'], 0, 2));
 
-        $user = User::create([
-            'name' => $validated['name'],
-            'username' => $validated['username'],
-            'password' => Hash::make($validated['password']),
-            'role' => $validated['role'],
-            'status' => 'Aktif',
-            'avatar_initials' => $initials,
-            'default_page' => User::getDefaultPageForRole($validated['role']),
-        ]);
+        // Akun baru belum aktif: pemilik email harus memasukkan kode OTP yang dikirim ke emailnya.
+        // Jika email gagal terkirim, pembuatan akun dibatalkan (tidak ada akun "hantu").
+        $otp = app(OtpService::class);
+        try {
+            $user = DB::transaction(function () use ($validated, $initials, $otp) {
+                $user = User::create([
+                    'name' => $validated['name'],
+                    'username' => $validated['username'],
+                    'email' => $validated['email'],
+                    'password' => Hash::make($validated['password']),
+                    'role' => $validated['role'],
+                    'status' => 'Menunggu Aktivasi',
+                    'avatar_initials' => $initials,
+                    'default_page' => User::getDefaultPageForRole($validated['role']),
+                ]);
+                $otp->issue($user);
+
+                return $user;
+            });
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Akun gagal dibuat karena email OTP tidak dapat dikirim. Periksa alamat email lalu coba lagi.',
+            ], 502);
+        }
 
         AuditLog::record(
             'TAMBAH_PENGGUNA',
@@ -91,17 +152,9 @@ class UserController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Pengguna baru berhasil ditambahkan.',
-            'data' => [
-                'id' => "usr-{$user->id_user}",
-                'id_user' => $user->id_user,
-                'name' => $user->name,
-                'username' => $user->username,
-                'role' => $user->role,
-                'status' => $user->status,
-                'initials' => $initials,
-                'createdAt' => now()->translatedFormat('d M Y'),
-            ],
+            'message' => "Pengguna dibuat. Kode OTP aktivasi telah dikirim ke {$user->email}.",
+            'requiresActivation' => true,
+            'data' => $this->userPayload($user),
         ], 201);
     }
 
@@ -113,13 +166,32 @@ class UserController extends Controller
         $idUser = is_numeric($id) ? $id : (int) str_replace('usr-', '', $id);
         $user = User::findOrFail($idUser);
 
-        $validated = $request->validate([
-            'username' => 'sometimes|string|min:5|unique:users,username,' . $user->id_user . ',id_user|regex:/^\S*$/',
-            'password' => 'nullable|string|min:8',
-            'role' => 'sometimes|in:Super Admin,Tata Usaha,Admin dapur MBG,Ahli Gizi',
-            'status' => 'sometimes|in:Aktif,Nonaktif',
-        ]);
+        $this->normalize($request);
 
+        $validated = $request->validate([
+            'name' => ['sometimes', 'string', 'min:3', 'max:100', "regex:/^[\\pL][\\pL .'-]*$/u"],
+            'username' => ['sometimes', 'string', 'min:5', 'max:30', 'regex:/^[a-z0-9._]+$/', Rule::unique('users', 'username')->ignore($user->id_user, 'id_user')],
+            'email' => ['sometimes', 'string', 'max:254', 'email:rfc', Rule::unique('users', 'email')->ignore($user->id_user, 'id_user')],
+            'password' => ['nullable', 'string', 'min:8', 'max:72', 'regex:/^(?=.*[A-Za-z])(?=.*\\d)\\S+$/'],
+            'role' => ['sometimes', Rule::in(self::ROLES)],
+            'status' => ['sometimes', Rule::in(['Aktif', 'Nonaktif'])],
+        ], self::MESSAGES);
+
+        // Akun yang menunggu aktivasi hanya boleh diaktifkan lewat OTP, bukan lewat edit status.
+        if ($user->status === 'Menunggu Aktivasi' && isset($validated['status'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Akun ini belum diaktifkan oleh pemiliknya (menunggu verifikasi OTP).',
+            ], 422);
+        }
+
+        if (isset($validated['name'])) {
+            $user->name = $validated['name'];
+            $user->avatar_initials = strtoupper(substr($validated['name'], 0, 2));
+        }
+        if (isset($validated['email'])) {
+            $user->email = $validated['email'];
+        }
         if (isset($validated['username'])) {
             $user->username = $validated['username'];
         }
@@ -160,16 +232,7 @@ class UserController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Data pengguna berhasil diperbarui.',
-            'data' => [
-                'id' => "usr-{$user->id_user}",
-                'id_user' => $user->id_user,
-                'name' => $user->name,
-                'username' => $user->username,
-                'role' => $user->role,
-                'status' => $user->status,
-                'initials' => $user->avatar_initials ?: strtoupper(substr($user->name, 0, 2)),
-                'createdAt' => $user->created_at ? $user->created_at->translatedFormat('d M Y') : '10 Jan 2025',
-            ],
+            'data' => $this->userPayload($user),
         ]);
     }
 

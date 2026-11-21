@@ -38,6 +38,10 @@ Route::get('/ping', function () {
 // FR-01 Login. Dibatasi 10 percobaan per menit per IP (mencegah tebak password).
 Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
 
+// Aktivasi akun via OTP email (publik; dibatasi agar OTP tidak bisa ditebak).
+Route::post('/activate', [AuthController::class, 'activate'])->middleware('throttle:10,1');
+Route::post('/activate/resend', [AuthController::class, 'resendOtp'])->middleware('throttle:3,1');
+
 // Unduh laporan (HTML siap cetak). Masih publik karena frontend membukanya
 // lewat window.open() yang tidak bisa mengirim token. Isinya hanya jadwal menu,
 // tanpa data pribadi anak. (Lihat catatan di README untuk pengembangan berikutnya.)

@@ -15,6 +15,9 @@ return new class extends Migration
             $table->id('id_user');
             $table->string('name');
             $table->string('username')->unique();
+            // Email dipakai untuk aktivasi akun & pengiriman kode OTP.
+            $table->string('email', 254)->unique()->nullable();
+            $table->timestamp('email_verified_at')->nullable();
             $table->string('password');
             $table->enum('role', [
                 'Super Admin',
@@ -22,7 +25,12 @@ return new class extends Migration
                 'Admin dapur MBG',
                 'Ahli Gizi'
             ])->default('Tata Usaha');
-            $table->enum('status', ['Aktif', 'Nonaktif', 'Deleted'])->default('Aktif');
+            $table->enum('status', ['Aktif', 'Nonaktif', 'Deleted', 'Menunggu Aktivasi'])->default('Aktif');
+            // OTP aktivasi: hanya hash-nya yang disimpan, berlaku singkat, dan dibatasi percobaannya.
+            $table->string('otp_hash')->nullable();
+            $table->timestamp('otp_expires_at')->nullable();
+            $table->unsignedTinyInteger('otp_attempts')->default(0);
+            $table->timestamp('otp_sent_at')->nullable();
             $table->string('avatar_initials', 10)->nullable();
             $table->string('default_page')->default('/data-anak');
             $table->string('api_token', 80)->unique()->nullable()->default(null);

@@ -40,13 +40,28 @@ class RekomendasiMenuController extends Controller
      */
     public function storeFood(Request $request): JsonResponse
     {
+        $request->merge(['name' => preg_replace('/\s+/', ' ', trim((string) $request->input('name')))]);
+
         $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'calories' => 'required|numeric|min:0',
-            'protein' => 'required|numeric|min:0',
-            'carbs' => 'required|numeric|min:0',
-            'fat' => 'required|numeric|min:0',
-            'category' => 'nullable|string',
+            'name' => ['required', 'string', 'min:2', 'max:50', "regex:/^[\\pL][\\pL0-9 ().,'-]*$/u", 'unique:menu_makanan,nama_makanan'],
+            'calories' => 'required|numeric|min:0|max:2000',
+            'protein' => 'required|numeric|min:0|max:500',
+            'carbs' => 'required|numeric|min:0|max:500',
+            'fat' => 'required|numeric|min:0|max:500',
+            'category' => 'nullable|string|max:50',
+        ], [
+            'name.required' => 'Nama makanan wajib diisi.',
+            'name.min' => 'Nama makanan minimal 2 karakter.',
+            'name.max' => 'Nama makanan maksimal 50 karakter.',
+            'name.regex' => 'Nama makanan harus diawali huruf dan tidak boleh berisi simbol khusus.',
+            'name.unique' => 'Bahan dengan nama ini sudah ada di database.',
+            'calories.required' => 'Kalori wajib diisi.',
+            'protein.required' => 'Protein wajib diisi.',
+            'carbs.required' => 'Karbohidrat wajib diisi.',
+            'fat.required' => 'Lemak wajib diisi.',
+            'numeric' => ':attribute harus berupa angka.',
+            'min' => ':attribute tidak boleh negatif.',
+            'max' => ':attribute maksimal :max.',
         ]);
 
         $slug = 'food-' . Str::slug($validated['name']) . '-' . rand(100, 999);
@@ -148,9 +163,11 @@ class RekomendasiMenuController extends Controller
     public function saveDraft(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'id' => 'nullable|string',
+            'id' => 'nullable|string|max:100',
             'days' => 'required|array',
-            'title' => 'nullable|string',
+            'days.*' => 'array',
+            'days.*.*' => 'string|max:100',
+            'title' => 'nullable|string|max:150',
         ]);
 
         $id = $validated['id'] ?? ('menu-draft-' . date('Ymd-His'));

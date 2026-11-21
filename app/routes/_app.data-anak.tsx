@@ -11,6 +11,15 @@ import { ConfirmDialog, Modal } from "@/components/app-shell/Modal";
 import { GENDERS, useAppStore, type Gender, type Kid, type KidInput } from "@/lib/nutrition-store";
 import { NUTRITION_STATUSES, type NutritionStatus } from "@/lib/nutrition-status";
 import { SmartGrowthAPI } from "@/lib/api-client";
+import { FieldError, fieldProps } from "@/components/app-shell/FieldError";
+import {
+  hasErrors,
+  parseAge,
+  parseNumber,
+  validateKidForm,
+  type FieldErrors,
+  type KidFields,
+} from "@/lib/validation";
 
 export function meta() {
   return [{ title: "Data Anak - Sistem Gizi" }];
@@ -48,7 +57,7 @@ const EMPTY_FORM: FormState = {
 };
 
 const inputClass =
-  "h-10 w-full rounded-lg border border-black/10 bg-white px-3 text-sm text-[#0A0A0A] outline-none placeholder:text-[#B3B3B3] focus:border-[#0891B2]";
+  "h-10 w-full rounded-lg border border-black/10 bg-white px-3 text-sm text-[#0A0A0A] outline-none placeholder:text-[#B3B3B3] focus:border-[#0891B2] aria-[invalid=true]:border-[#E7000B] aria-[invalid=true]:bg-red-50/40";
 
 export default function DataAnakRoute() {
   const kids = useAppStore((state) => state.kids);
@@ -62,7 +71,7 @@ export default function DataAnakRoute() {
   const [showForm, setShowForm] = useState(false);
   const [editingKid, setEditingKid] = useState<Kid | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
-  const [formError, setFormError] = useState("");
+  const [errors, setErrors] = useState<FieldErrors<KidFields>>({});
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -86,13 +95,15 @@ export default function DataAnakRoute() {
 
   const pendingDelete = kids.find((kid) => kid.id === pendingDeleteId);
 
-  const updateField = <K extends keyof FormState>(key: K, value: FormState[K]) =>
+  const updateField = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
+    setErrors((current) => (current[key as KidFields] ? { ...current, [key]: undefined } : current));
+  };
 
   const openAddForm = () => {
     setEditingKid(null);
     setForm(EMPTY_FORM);
-    setFormError("");
+    setErrors({});
     setShowForm(true);
   };
 
@@ -108,7 +119,7 @@ export default function DataAnakRoute() {
       status: kid.status,
       alergi: kid.alergi || "-",
     });
-    setFormError("");
+    setErrors({});
     setShowForm(true);
   };
 
@@ -116,26 +127,18 @@ export default function DataAnakRoute() {
     setShowForm(false);
     setEditingKid(null);
     setForm(EMPTY_FORM);
-    setFormError("");
+    setErrors({});
   };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const heightCm = Number(form.heightCm);
-    const weightKg = Number(form.weightKg);
+    const found = validateKidForm(form, { genders: GENDERS, statuses: NUTRITION_STATUSES });
+    setErrors(found);
+    if (hasErrors(found)) return;
 
-    if (!form.name.trim() || !form.classLabel.trim()) {
-      setFormError("Nama dan kelas wajib diisi.");
-      return;
-    }
-    if (!(heightCm > 0) || !(weightKg > 0)) {
-      setFormError("TB dan BB harus berupa angka valid lebih dari 0.");
-      return;
-    }
-
-    // Extract age years from string like "5th 8bln" or raw number
-    const ageMatch = form.ageDisplay.match(/(\d+)/);
-    const parsedAgeYears = ageMatch ? Number(ageMatch[1]) : 5;
+    const heightCm = parseNumber(form.heightCm) as number;
+    const weightKg = parseNumber(form.weightKg) as number;
+    const parsedAgeYears = (parseAge(form.ageDisplay) as { years: number }).years;
 
     const kidData: KidInput = {
       name: form.name.trim(),
@@ -326,33 +329,38 @@ export default function DataAnakRoute() {
           description="Isi data anak dan informasi alergi sesuai hasil pengukuran terbaru"
           onClose={closeForm}
         >
-          <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <form onSubmit={handleSubmit} noValidate className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <label className="flex flex-col gap-1.5 sm:col-span-2">
               <span className="text-xs font-bold text-[#1E1E1E]">Nama Lengkap</span>
               <input
                 className={inputClass}
-                required
+                {...fieldProps("kid-name", errors.name)}
+                maxLength={100}
                 value={form.name}
                 onChange={(event) => updateField("name", event.target.value)}
                 placeholder="Contoh: Ahmad Ridwan"
               />
+              <FieldError id="kid-name-error" message={errors.name} />
             </label>
 
             <label className="flex flex-col gap-1.5">
               <span className="text-xs font-bold text-[#1E1E1E]">Kelas</span>
               <input
                 className={inputClass}
-                required
+                {...fieldProps("kid-class", errors.classLabel)}
+                maxLength={20}
                 value={form.classLabel}
                 onChange={(event) => updateField("classLabel", event.target.value)}
                 placeholder="Contoh: TK A1"
               />
+              <FieldError id="kid-class-error" message={errors.classLabel} />
             </label>
 
             <label className="flex flex-col gap-1.5">
               <span className="text-xs font-bold text-[#1E1E1E]">Jenis Kelamin</span>
               <select
                 className={inputClass}
+                {...fieldProps("kid-gender", errors.gender)}
                 value={form.gender}
                 onChange={(event) => updateField("gender", event.target.value as Gender)}
               >
@@ -368,10 +376,13 @@ export default function DataAnakRoute() {
               <span className="text-xs font-bold text-[#1E1E1E]">Usia</span>
               <input
                 className={inputClass}
+                {...fieldProps("kid-age", errors.ageDisplay)}
+                maxLength={12}
                 value={form.ageDisplay}
                 onChange={(event) => updateField("ageDisplay", event.target.value)}
                 placeholder="Contoh: 5th 8bln"
               />
+              <FieldError id="kid-age-error" message={errors.ageDisplay} />
             </label>
 
             <div className="flex flex-col gap-1.5 sm:col-span-2">
@@ -381,10 +392,13 @@ export default function DataAnakRoute() {
               </div>
               <input
                 className={inputClass}
+                {...fieldProps("kid-alergi", errors.alergi)}
+                maxLength={200}
                 value={form.alergi}
                 onChange={(event) => updateField("alergi", event.target.value)}
                 placeholder="Contoh: Telur, Kacang, Susu Sapi, atau '-' jika tidak ada"
               />
+              <FieldError id="kid-alergi-error" message={errors.alergi} />
               <div className="flex flex-wrap items-center gap-1.5 pt-1">
                 {[
                   { label: "Tidak Ada (-)", val: "-" },
@@ -423,12 +437,16 @@ export default function DataAnakRoute() {
               <input
                 className={inputClass}
                 type="number"
-                min="0"
+                inputMode="decimal"
+                min="60"
+                max="160"
                 step="0.1"
+                {...fieldProps("kid-height", errors.heightCm)}
                 value={form.heightCm}
                 onChange={(event) => updateField("heightCm", event.target.value)}
                 placeholder="Tinggi badan (cm)"
               />
+              <FieldError id="kid-height-error" message={errors.heightCm} />
             </label>
 
             <label className="flex flex-col gap-1.5">
@@ -436,18 +454,23 @@ export default function DataAnakRoute() {
               <input
                 className={inputClass}
                 type="number"
-                min="0"
+                inputMode="decimal"
+                min="5"
+                max="80"
                 step="0.1"
+                {...fieldProps("kid-weight", errors.weightKg)}
                 value={form.weightKg}
                 onChange={(event) => updateField("weightKg", event.target.value)}
                 placeholder="Berat badan (kg)"
               />
+              <FieldError id="kid-weight-error" message={errors.weightKg} />
             </label>
 
             <label className="flex flex-col gap-1.5 sm:col-span-2">
               <span className="text-xs font-bold text-[#1E1E1E]">Status Gizi</span>
               <select
                 className={inputClass}
+                {...fieldProps("kid-status", errors.status)}
                 value={form.status}
                 onChange={(event) => updateField("status", event.target.value as NutritionStatus)}
               >
@@ -459,8 +482,10 @@ export default function DataAnakRoute() {
               </select>
             </label>
 
-            {formError ? (
-              <p className="text-sm font-medium text-[#E7000B] sm:col-span-2">{formError}</p>
+            {hasErrors(errors) ? (
+              <p role="alert" className="text-sm font-medium text-[#E7000B] sm:col-span-2">
+                Periksa kembali isian yang ditandai merah.
+              </p>
             ) : null}
 
             <div className="mt-2 flex justify-end gap-2 sm:col-span-2">

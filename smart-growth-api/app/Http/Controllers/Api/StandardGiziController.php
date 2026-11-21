@@ -62,11 +62,17 @@ class StandardGiziController extends Controller
         $standard = StandardGizi::findOrFail($id);
 
         $validated = $request->validate([
-            'mean_tinggi' => 'sometimes|numeric',
-            'sd_tinggi' => 'sometimes|numeric',
-            'mean_berat' => 'sometimes|numeric',
-            'sd_berat' => 'sometimes|numeric',
-            'kebutuhan_kalori' => 'sometimes|integer',
+            'mean_tinggi' => 'sometimes|numeric|between:30,200',
+            'sd_tinggi' => 'sometimes|numeric|gt:0|max:30', // SD harus > 0 (pembagi Z-Score)
+            'mean_berat' => 'sometimes|numeric|between:2,100',
+            'sd_berat' => 'sometimes|numeric|gt:0|max:30',
+            'kebutuhan_kalori' => 'sometimes|integer|between:500,4000',
+        ], [
+            'numeric' => ':attribute harus berupa angka.',
+            'integer' => ':attribute harus berupa bilangan bulat.',
+            'between' => ':attribute harus antara :min dan :max.',
+            'gt' => ':attribute harus lebih besar dari 0 (dipakai sebagai pembagi Z-Score).',
+            'max' => ':attribute maksimal :max.',
         ]);
 
         $standard->update($validated);

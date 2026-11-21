@@ -14,6 +14,28 @@ import { useEffect, useState } from "react";
 import { ConfirmDialog, Modal } from "@/components/app-shell/Modal";
 import { useAppStore } from "@/lib/nutrition-store";
 import { SmartGrowthAPI } from "@/lib/api-client";
+import { FieldError, fieldProps } from "@/components/app-shell/FieldError";
+import { hasErrors, validateUserForm, type FieldErrors, type UserFields } from "@/lib/validation";
+
+const ROLES = ["Super Admin", "Tata Usaha", "Admin dapur MBG", "Ahli Gizi"] as const;
+
+const INPUT_CLASS =
+  "h-10 rounded-xl border border-black/10 bg-white px-3 text-sm outline-none focus:border-[#0891B2] aria-[invalid=true]:border-[#E7000B] aria-[invalid=true]:bg-red-50/40";
+
+const STATUS_BADGES: Record<ManagedUser["status"], { box: string; dot: string }> = {
+  Aktif: { box: "bg-emerald-50 text-emerald-700", dot: "bg-emerald-500" },
+  Nonaktif: { box: "bg-slate-100 text-slate-600", dot: "bg-slate-400" },
+  "Menunggu Aktivasi": { box: "bg-amber-50 text-amber-700", dot: "bg-amber-500" },
+};
+
+const initialsOf = (name: string) =>
+  name
+    .trim()
+    .split(/\s+/)
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
 
 export function meta() {
   return [{ title: "Kelola Pengguna - Sistem Gizi" }];
@@ -23,8 +45,9 @@ export type ManagedUser = {
   id: string;
   name: string;
   username: string;
+  email?: string | null;
   role: "Super Admin" | "Tata Usaha" | "Admin dapur MBG" | "Ahli Gizi";
-  status: "Aktif" | "Nonaktif";
+  status: "Aktif" | "Nonaktif" | "Menunggu Aktivasi";
   initials: string;
   createdAt: string;
 };
@@ -34,6 +57,7 @@ const INITIAL_USERS: ManagedUser[] = [
     id: "usr-1",
     name: "Dimas Vikriansyah",
     username: "dimas_vikrian",
+    email: "dimas@smartgrowth.id",
     role: "Super Admin",
     status: "Aktif",
     initials: "DV",
@@ -43,6 +67,7 @@ const INITIAL_USERS: ManagedUser[] = [
     id: "usr-2",
     name: "Siti Aminah",
     username: "siti_aminah",
+    email: "siti@smartgrowth.id",
     role: "Tata Usaha",
     status: "Aktif",
     initials: "SA",
@@ -52,6 +77,7 @@ const INITIAL_USERS: ManagedUser[] = [
     id: "usr-4",
     name: "Budi Santoso",
     username: "budi_santoso",
+    email: "budi@smartgrowth.id",
     role: "Admin dapur MBG",
     status: "Aktif",
     initials: "BS",
@@ -61,6 +87,7 @@ const INITIAL_USERS: ManagedUser[] = [
     id: "usr-3",
     name: "Dr. Ratna Dewi",
     username: "ratna_dewi",
+    email: "ratna@smartgrowth.id",
     role: "Ahli Gizi",
     status: "Aktif",
     initials: "RD",
@@ -86,7 +113,16 @@ export default function KelolaPenggunaRoute() {
   const [formName, setFormName] = useState("");
   const [formUsername, setFormUsername] = useState("");
   const [formPassword, setFormPassword] = useState("");
+  const [formEmail, setFormEmail] = useState("");
   const [formRole, setFormRole] = useState<ManagedUser["role"]>("Tata Usaha");
+  const [formErrors, setFormErrors] = useState<FieldErrors<UserFields>>({});
+  const [formServerError, setFormServerError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const clearError = (field: UserFields) => {
+    setFormErrors((c) => (c[field] ? { ...c, [field]: undefined } : c));
+    setFormServerError("");
+  };
 
   const notify = useAppStore((state) => state.notify);
 
@@ -110,8 +146,11 @@ export default function KelolaPenggunaRoute() {
     setEditingUser(null);
     setFormName("");
     setFormUsername("");
+    setFormEmail("");
     setFormPassword("");
     setFormRole("Tata Usaha");
+    setFormErrors({});
+    setFormServerError("");
     setIsModalOpen(true);
   };
 
@@ -119,76 +158,81 @@ export default function KelolaPenggunaRoute() {
     setEditingUser(user);
     setFormName(user.name);
     setFormUsername(user.username);
+    setFormEmail(user.email || "");
     setFormPassword("");
     setFormRole(user.role);
+    setFormErrors({});
+    setFormServerError("");
     setIsModalOpen(true);
   };
 
-  const handleSaveUser = (e: React.FormEvent) => {
+  const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formName.trim() || !formUsername.trim()) return;
+    if (saving) return;
 
-    if (editingUser) {
-      const updatePayload = {
-        name: formName.trim(),
-        username: formUsername.trim(),
-        role: formRole,
-        password: formPassword || undefined,
-      };
-      setUsers((prev) =>
-        prev.map((u) =>
-          u.id === editingUser.id
-            ? {
-                ...u,
-                name: formName.trim(),
-                username: formUsername.trim(),
-                role: formRole,
-                initials: formName
-                  .split(" ")
-                  .map((w) => w[0])
-                  .join("")
-                  .slice(0, 2)
-                  .toUpperCase(),
-              }
-            : u,
-        ),
-      );
-      SmartGrowthAPI.updateUser(editingUser.id, updatePayload).catch(() => {});
-      notify("Pengguna Diperbarui", `Data pengguna ${formName} berhasil disimpan.`);
-    } else {
-      const newUserData = {
-        name: formName.trim(),
-        username: formUsername.trim(),
-        role: formRole,
-        password: formPassword || "password123",
-      };
-      const newUser: ManagedUser = {
-        id: `usr-${Date.now()}`,
-        name: formName.trim(),
-        username: formUsername.trim(),
-        role: formRole,
-        status: "Aktif",
-        initials: formName
-          .split(" ")
-          .map((w) => w[0])
-          .join("")
-          .slice(0, 2)
-          .toUpperCase(),
-        createdAt: new Date().toLocaleDateString("id-ID", {
-          day: "2-digit",
-          month: "short",
-          year: "numeric",
-        }),
-      };
-      setUsers((prev) => [newUser, ...prev]);
-      SmartGrowthAPI.addUser(newUserData).then((res) => {
-        if (res && res.data) {
-          setUsers((prev) => prev.map((u) => (u.username === newUserData.username ? { ...u, id: res.data.id } : u)));
-        }
-      }).catch(() => {});
-      notify("Pengguna Ditambahkan", `Pengguna ${formName} berhasil didaftarkan ke sistem.`);
+    const others = users.filter((u) => u.id !== editingUser?.id);
+    const found = validateUserForm(
+      { name: formName, username: formUsername, email: formEmail, password: formPassword, role: formRole },
+      {
+        roles: ROLES,
+        existingUsernames: others.map((u) => u.username),
+        existingEmails: others.map((u) => u.email || "").filter(Boolean),
+        isEdit: Boolean(editingUser),
+      },
+    );
+    setFormErrors(found);
+    setFormServerError("");
+    if (hasErrors(found)) return;
+
+    const payload = {
+      name: formName.trim().replace(/\s+/g, " "),
+      username: formUsername.trim(),
+      email: formEmail.trim().toLowerCase(),
+      role: formRole,
+      ...(formPassword ? { password: formPassword } : {}),
+    };
+
+    setSaving(true);
+    const res = editingUser
+      ? await SmartGrowthAPI.updateUser(editingUser.id, payload)
+      : await SmartGrowthAPI.addUser(payload);
+    setSaving(false);
+
+    if (!res.ok && res.status !== 0) {
+      // Validasi backend menolak: tampilkan di field terkait.
+      setFormErrors(res.errors as FieldErrors<UserFields>);
+      setFormServerError(hasErrors(res.errors) ? "" : res.message);
+      return;
     }
 
+    const offline = !res.ok;
+    const saved: ManagedUser = res.ok
+      ? res.data.data
+      : {
+          id: editingUser?.id ?? `usr-${Date.now()}`,
+          name: payload.name,
+          username: payload.username,
+          email: payload.email,
+          role: payload.role,
+          status: editingUser?.status ?? "Aktif",
+          initials: initialsOf(payload.name),
+          createdAt:
+            editingUser?.createdAt ??
+            new Date().toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }),
+        };
+
+    if (editingUser) {
+      setUsers((prev) => prev.map((u) => (u.id === editingUser.id ? saved : u)));
+      notify("Pengguna Diperbarui", `Data pengguna ${saved.name} berhasil disimpan.`);
+    } else {
+      setUsers((prev) => [saved, ...prev]);
+      notify(
+        "Pengguna Ditambahkan",
+        offline
+          ? `Mode offline: ${saved.name} disimpan lokal tanpa aktivasi email.`
+          : `Kode OTP aktivasi dikirim ke ${saved.email}. Akun aktif setelah pemiliknya memasukkan kode tersebut.`,
+      );
+    }
     setIsModalOpen(false);
   };
 
@@ -288,7 +332,10 @@ export default function KelolaPenggunaRoute() {
                         </span>
                         <div>
                           <span className="font-semibold block text-sm">{user.name}</span>
-                          <span className="text-xs text-[#64748B]">@{user.username}</span>
+                          <span className="text-xs text-[#64748B]">
+                            @{user.username}
+                            {user.email ? ` · ${user.email}` : ""}
+                          </span>
                         </div>
                       </div>
                     </td>
@@ -300,8 +347,10 @@ export default function KelolaPenggunaRoute() {
                       </span>
                     </td>
                     <td className="px-5 py-3.5">
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
-                        <span className="size-1.5 rounded-full bg-emerald-500" />
+                      <span
+                        className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${(STATUS_BADGES[user.status] ?? STATUS_BADGES.Aktif).box}`}
+                      >
+                        <span className={`size-1.5 rounded-full ${(STATUS_BADGES[user.status] ?? STATUS_BADGES.Aktif).dot}`} />
                         {user.status}
                       </span>
                     </td>
@@ -339,29 +388,67 @@ export default function KelolaPenggunaRoute() {
           title={editingUser ? "Edit Pengguna" : "Tambah Pengguna Baru"}
           onClose={() => setIsModalOpen(false)}
         >
-          <form onSubmit={handleSaveUser} className="flex flex-col gap-4">
+          <form onSubmit={handleSaveUser} noValidate className="flex flex-col gap-4">
             <label className="flex flex-col gap-1.5 text-sm">
               <span className="font-medium text-[#1D293D]">Nama Lengkap</span>
               <input
                 type="text"
-                required
+                maxLength={100}
+                autoComplete="off"
+                {...fieldProps("user-name", formErrors.name)}
                 value={formName}
-                onChange={(e) => setFormName(e.target.value)}
+                onChange={(e) => {
+                  setFormName(e.target.value);
+                  clearError("name");
+                }}
                 placeholder="Contoh: Dimas Vikriansyah"
-                className="h-10 rounded-xl border border-black/10 px-3 text-sm outline-none focus:border-[#0891B2]"
+                className={INPUT_CLASS}
               />
+              <FieldError id="user-name-error" message={formErrors.name} />
             </label>
 
             <label className="flex flex-col gap-1.5 text-sm">
               <span className="font-medium text-[#1D293D]">Username</span>
               <input
                 type="text"
-                required
+                maxLength={30}
+                autoComplete="off"
+                {...fieldProps("user-username", formErrors.username)}
                 value={formUsername}
-                onChange={(e) => setFormUsername(e.target.value)}
+                onChange={(e) => {
+                  setFormUsername(e.target.value);
+                  clearError("username");
+                }}
                 placeholder="Contoh: dimas_vikrian"
-                className="h-10 rounded-xl border border-black/10 px-3 text-sm outline-none focus:border-[#0891B2]"
+                className={INPUT_CLASS}
               />
+              <span className="text-[11px] text-[#717182]">
+                5-30 karakter: huruf kecil, angka, titik, atau garis bawah.
+              </span>
+              <FieldError id="user-username-error" message={formErrors.username} />
+            </label>
+
+            <label className="flex flex-col gap-1.5 text-sm">
+              <span className="font-medium text-[#1D293D]">Email</span>
+              <input
+                type="email"
+                maxLength={254}
+                autoComplete="off"
+                {...fieldProps("user-email", formErrors.email)}
+                value={formEmail}
+                onChange={(e) => {
+                  setFormEmail(e.target.value);
+                  clearError("email");
+                }}
+                placeholder="Contoh: nama@domain.com"
+                className={INPUT_CLASS}
+              />
+              {!editingUser ? (
+                <span className="text-[11px] text-[#717182]">
+                  Kode OTP aktivasi akan dikirim ke email ini.
+                </span>
+              ) : null}
+              <FieldError id="user-email-error" message={formErrors.email} />
             </label>
 
             <label className="flex flex-col gap-1.5 text-sm">
@@ -370,27 +457,45 @@ export default function KelolaPenggunaRoute() {
               </span>
               <input
                 type="password"
-                required={!editingUser}
+                maxLength={72}
+                autoComplete="new-password"
+                {...fieldProps("user-password", formErrors.password)}
                 value={formPassword}
-                onChange={(e) => setFormPassword(e.target.value)}
-                placeholder="Masukkan password"
-                className="h-10 rounded-xl border border-black/10 px-3 text-sm outline-none focus:border-[#0891B2]"
+                onChange={(e) => {
+                  setFormPassword(e.target.value);
+                  clearError("password");
+                }}
+                placeholder="Minimal 8 karakter, kombinasi huruf & angka"
+                className={INPUT_CLASS}
               />
+              <FieldError id="user-password-error" message={formErrors.password} />
             </label>
 
             <label className="flex flex-col gap-1.5 text-sm">
               <span className="font-medium text-[#1D293D]">Peran / Role</span>
               <select
+                {...fieldProps("user-role", formErrors.role)}
                 value={formRole}
-                onChange={(e) => setFormRole(e.target.value as ManagedUser["role"])}
-                className="h-10 rounded-xl border border-black/10 bg-white px-3 text-sm outline-none focus:border-[#0891B2]"
+                onChange={(e) => {
+                  setFormRole(e.target.value as ManagedUser["role"]);
+                  clearError("role");
+                }}
+                className={INPUT_CLASS}
               >
-                <option value="Super Admin">Super Admin</option>
-                <option value="Tata Usaha">Tata Usaha</option>
-                <option value="Admin dapur MBG">Admin dapur MBG</option>
-                <option value="Ahli Gizi">Ahli Gizi</option>
+                {ROLES.map((role) => (
+                  <option key={role} value={role}>
+                    {role}
+                  </option>
+                ))}
               </select>
+              <FieldError id="user-role-error" message={formErrors.role} />
             </label>
+
+            {formServerError ? (
+              <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-medium text-[#D4183D]">
+                {formServerError}
+              </p>
+            ) : null}
 
             <div className="mt-2 flex justify-end gap-2">
               <button
@@ -402,9 +507,10 @@ export default function KelolaPenggunaRoute() {
               </button>
               <button
                 type="submit"
-                className="h-10 rounded-xl bg-[#0891B2] px-4 text-sm font-medium text-white hover:bg-[#0E7490]"
+                disabled={saving}
+                className="h-10 rounded-xl bg-[#0891B2] px-4 text-sm font-medium text-white hover:bg-[#0E7490] disabled:opacity-70"
               >
-                Simpan
+                {saving ? "Menyimpan..." : "Simpan"}
               </button>
             </div>
           </form>
