@@ -8,6 +8,7 @@ use App\Models\AuditLog;
 use App\Models\LaporanMenu;
 use App\Models\MenuMakanan;
 use App\Models\RekomendasiMenu;
+use App\Services\OtpService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -40,13 +41,28 @@ class RekomendasiMenuController extends Controller
      */
     public function storeFood(Request $request): JsonResponse
     {
+        $request->merge(['name' => preg_replace('/\s+/', ' ', trim((string) $request->input('name')))]);
+
         $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'calories' => 'required|numeric|min:0',
-            'protein' => 'required|numeric|min:0',
-            'carbs' => 'required|numeric|min:0',
-            'fat' => 'required|numeric|min:0',
-            'category' => 'nullable|string',
+            'name' => ['required', 'string', 'min:2', 'max:50', "regex:/^[\\pL][\\pL0-9 ().,'-]*$/u", 'unique:menu_makanan,nama_makanan'],
+            'calories' => 'required|numeric|min:0|max:2000',
+            'protein' => 'required|numeric|min:0|max:500',
+            'carbs' => 'required|numeric|min:0|max:500',
+            'fat' => 'required|numeric|min:0|max:500',
+            'category' => 'nullable|string|max:50',
+        ], [
+            'name.required' => 'Nama makanan wajib diisi.',
+            'name.min' => 'Nama makanan minimal 2 karakter.',
+            'name.max' => 'Nama makanan maksimal 50 karakter.',
+            'name.regex' => 'Nama makanan harus diawali huruf dan tidak boleh berisi simbol khusus.',
+            'name.unique' => 'Bahan dengan nama ini sudah ada di database.',
+            'calories.required' => 'Kalori wajib diisi.',
+            'protein.required' => 'Protein wajib diisi.',
+            'carbs.required' => 'Karbohidrat wajib diisi.',
+            'fat.required' => 'Lemak wajib diisi.',
+            'numeric' => ':attribute harus berupa angka.',
+            'min' => ':attribute tidak boleh negatif.',
+            'max' => ':attribute maksimal :max.',
         ]);
 
         $slug = 'food-' . Str::slug($validated['name']) . '-' . rand(100, 999);
@@ -148,9 +164,11 @@ class RekomendasiMenuController extends Controller
     public function saveDraft(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'id' => 'nullable|string',
+            'id' => 'nullable|string|max:100',
             'days' => 'required|array',
-            'title' => 'nullable|string',
+            'days.*' => 'array',
+            'days.*.*' => 'string|max:100',
+            'title' => 'nullable|string|max:150',
         ]);
 
         $id = $validated['id'] ?? ('menu-draft-' . date('Ymd-His'));
@@ -178,17 +196,124 @@ class RekomendasiMenuController extends Controller
         ]);
     }
 
-    /**
-     * Submit and approve menu (FR-06 Review & Approval - DPPL Algoritma #3)
-     */
-    public function approve(Request $request, $id): JsonResponse
+    /** Sensor email untuk ditampilkan: ratna@smartgrowth.id -> r****@smartgrowth.id */
+    private function maskEmail(string $email): string
     {
-        $menu = RekomendasiMenu::findOrFail($id);
+        [$local, $domain] = explode('@', $email, 2) + [1 => ''];
+
+        return mb_substr($local, 0, 1) . str_repeat('*', max(1, mb_strlen($local) - 1)) . '@' . $domain;
+    }
+
+    /** Hanya draft yang boleh di-approve. */
+    private function draftOrFail(string $id): RekomendasiMenu|JsonResponse
+    {
+        $menu = RekomendasiMenu::find($id);
+        if (!$menu) {
+            return response()->json(['success' => false, 'message' => 'Menu tidak ditemukan.'], 404);
+        }
+        if ($menu->status !== 'draft') {
+            return response()->json(['success' => false, 'message' => 'Menu ini sudah di-approve sebelumnya.'], 422);
+        }
+
+        return $menu;
+    }
+
+    /**
+     * Langkah 1 approve menu: kirim OTP ke email penyetuju (berlaku 5 menit).
+     */
+    public function requestApprovalOtp(Request $request, OtpService $otp, $id): JsonResponse
+    {
+        $menu = $this->draftOrFail($id);
+        if ($menu instanceof JsonResponse) {
+            return $menu;
+        }
+
+        $user = $request->user();
+        if (!$user->email) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Akun Anda belum memiliki email. Minta Super Admin menambahkan email terlebih dahulu.',
+            ], 422);
+        }
+
+        $purpose = OtpService::menuApprovalPurpose($menu);
+        $wait = $otp->resendWaitSeconds($user, $purpose);
+        if ($wait > 0) {
+            return response()->json([
+                'success' => false,
+                'message' => "Kode baru saja dikirim. Tunggu {$wait} detik sebelum meminta lagi.",
+                'retryAfter' => $wait,
+            ], 429);
+        }
+
+        try {
+            $otp->issueMenuApproval($user, $menu);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Email OTP gagal dikirim. Coba lagi beberapa saat.',
+            ], 502);
+        }
+
+        AuditLog::record(
+            'MINTA_OTP_APPROVE_MENU',
+            "{$user->name} meminta kode OTP untuk approve menu {$menu->title} ({$menu->id_rekomendasi})",
+            $user
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Kode OTP dikirim ke ' . $this->maskEmail($user->email) . '.',
+            'email' => $this->maskEmail($user->email),
+            'expiresIn' => OtpService::APPROVAL_MINUTES * 60,
+            'maxAttempts' => OtpService::APPROVAL_MAX_ATTEMPTS,
+        ]);
+    }
+
+    /**
+     * Langkah 2: approve menu setelah OTP benar (FR-06 Review & Approval - DPPL Algoritma #3).
+     */
+    public function approve(Request $request, OtpService $otp, $id): JsonResponse
+    {
+        $request->validate([
+            'otp' => ['required', 'string', 'regex:/^\d{6}$/'],
+        ], [
+            'otp.required' => 'Kode OTP wajib diisi.',
+            'otp.regex' => 'Kode OTP harus berupa 6 digit angka.',
+        ]);
+
+        $menu = $this->draftOrFail($id);
+        if ($menu instanceof JsonResponse) {
+            return $menu;
+        }
         $user = $request->user();
 
+        $result = $otp->verifyMenuApproval($user, $menu, $request->input('otp'));
+
+        if ($result !== OtpService::OK) {
+            [$status, $message] = match ($result) {
+                OtpService::INVALID => [422, 'Kode OTP salah. Sisa percobaan: ' . $otp->attemptsLeft($user, OtpService::APPROVAL_MAX_ATTEMPTS) . '.'],
+                OtpService::LOCKED => [429, 'Terlalu banyak percobaan salah. Minta kode OTP baru.'],
+                OtpService::EXPIRED => [422, 'Kode OTP sudah kedaluwarsa. Minta kode OTP baru.'],
+                default => [422, 'Minta kode OTP terlebih dahulu.'],
+            };
+
+            if ($result === OtpService::LOCKED) {
+                AuditLog::record(
+                    'APPROVE_MENU_DIBLOKIR',
+                    "Approve menu {$menu->title} ({$menu->id_rekomendasi}) oleh {$user->name} diblokir: OTP salah " . OtpService::APPROVAL_MAX_ATTEMPTS . ' kali',
+                    $user
+                );
+            }
+
+            return response()->json(['success' => false, 'code' => strtoupper($result), 'message' => $message], $status);
+        }
+
         $menu->status = 'submitted';
-        $menu->approved_by_id = $user?->id_user ?? 3;
-        $menu->approved_by_name = $user?->name ?? 'Dr. Ratna Dewi';
+        $menu->approved_by_id = $user->id_user;
+        $menu->approved_by_name = $user->name;
         $menu->approved_at = now();
         $menu->waktu_dibuat = date('H.i');
         $menu->save();
@@ -211,7 +336,7 @@ class RekomendasiMenuController extends Controller
 
         AuditLog::record(
             'APPROVE_MENU',
-            "Ahli Gizi {$menu->approved_by_name} menyetujui rekomendasi menu {$menu->title}",
+            "{$user->name} menyetujui rekomendasi menu {$menu->title} ({$menu->id_rekomendasi}), dikonfirmasi OTP email",
             $user
         );
 

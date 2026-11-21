@@ -36,6 +36,53 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
   }
 }
 
+export type ApiResult<T> =
+  | { ok: true; status: number; data: T }
+  | {
+      ok: false;
+      /** 0 = server tidak dapat dihubungi (offline). */
+      status: number;
+      message: string;
+      /** Error per field dari validasi Laravel (HTTP 422). */
+      errors: Record<string, string>;
+      body: any;
+    };
+
+/**
+ * Seperti apiFetch, tetapi tidak membuang pesan error server, sehingga
+ * error validasi backend (422) bisa ditampilkan di field form yang sesuai.
+ */
+export async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promise<ApiResult<T>> {
+  try {
+    const token = typeof window !== "undefined" ? localStorage.getItem("smart_growth_token") : null;
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(options.headers as Record<string, string>),
+      },
+    });
+    const body = await response.json().catch(() => null);
+    if (response.ok) return { ok: true, status: response.status, data: body as T };
+
+    const errors: Record<string, string> = {};
+    for (const [field, messages] of Object.entries(body?.errors ?? {})) {
+      errors[field] = Array.isArray(messages) ? String(messages[0]) : String(messages);
+    }
+    return {
+      ok: false,
+      status: response.status,
+      message: body?.message || `Terjadi kesalahan (HTTP ${response.status}).`,
+      errors,
+      body,
+    };
+  } catch {
+    return { ok: false, status: 0, message: "Server tidak dapat dihubungi.", errors: {}, body: null };
+  }
+}
+
 export const SmartGrowthAPI = {
   // Auth & Roles
   login: async (username: string, password: string) => {
@@ -66,6 +113,19 @@ export const SmartGrowthAPI = {
     });
   },
 
+  // Aktivasi akun via OTP email
+  activateAccount: (email: string, otp: string) =>
+    apiRequest<{ success: boolean; message: string }>("/activate", {
+      method: "POST",
+      body: JSON.stringify({ email, otp }),
+    }),
+
+  resendActivationOtp: (email: string) =>
+    apiRequest<{ success: boolean; message: string }>("/activate/resend", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
   logout: async () => {
     return await apiFetch("/logout", { method: "POST" });
   },
@@ -87,19 +147,17 @@ export const SmartGrowthAPI = {
     return await apiFetch<{ success: boolean; data: any[] }>("/users");
   },
 
-  addUser: async (data: any) => {
-    return await apiFetch<{ success: boolean; message?: string; data: any }>("/users", {
+  addUser: (data: any) =>
+    apiRequest<{ success: boolean; message?: string; requiresActivation?: boolean; data: any }>("/users", {
       method: "POST",
       body: JSON.stringify(data),
-    });
-  },
+    }),
 
-  updateUser: async (id: string, data: any) => {
-    return await apiFetch<{ success: boolean; message?: string; data: any }>(`/users/${id}`, {
+  updateUser: (id: string, data: any) =>
+    apiRequest<{ success: boolean; message?: string; data: any }>(`/users/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
-    });
-  },
+    }),
 
   deleteUser: async (id: string) => {
     return await apiFetch<{ success: boolean; message?: string }>(`/users/${id}`, {
@@ -112,19 +170,17 @@ export const SmartGrowthAPI = {
     return await apiFetch<{ success: boolean; data: any[] }>("/anak");
   },
 
-  addKid: async (data: any) => {
-    return await apiFetch<{ success: boolean; message?: string; data: any }>("/anak", {
+  addKid: (data: any) =>
+    apiRequest<{ success: boolean; message?: string; data: any }>("/anak", {
       method: "POST",
       body: JSON.stringify(data),
-    });
-  },
+    }),
 
-  updateKid: async (id: string, data: any) => {
-    return await apiFetch<{ success: boolean; message?: string; data: any }>(`/anak/${id}`, {
+  updateKid: (id: string, data: any) =>
+    apiRequest<{ success: boolean; message?: string; data: any }>(`/anak/${encodeURIComponent(id)}`, {
       method: "PUT",
       body: JSON.stringify(data),
-    });
-  },
+    }),
 
   deleteKid: async (id: string) => {
     return await apiFetch<{ success: boolean; message?: string }>(`/anak/${id}`, {
@@ -155,6 +211,13 @@ export const SmartGrowthAPI = {
     return await apiFetch<{ success: boolean; data: any[] }>("/foods");
   },
 
+  /** Tambah bahan makanan baru (divalidasi juga di server). */
+  addFood: (data: { name: string; calories: number; protein: number; carbs: number; fat: number }) =>
+    apiRequest<{ success: boolean; message?: string; data: any }>("/foods", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
   getMenus: async () => {
     return await apiFetch<{ success: boolean; data: any[] }>("/rekomendasi-menu");
   },
@@ -172,11 +235,19 @@ export const SmartGrowthAPI = {
     });
   },
 
-  approveMenu: async (menuId: string) => {
-    return await apiFetch<{ success: boolean; data: any }>(`/rekomendasi-menu/${menuId}/approve`, {
-      method: "POST",
-    });
-  },
+  /** Langkah 1 approve: kirim OTP ke email penyetuju. */
+  requestApproveMenuOtp: (menuId: string) =>
+    apiRequest<{ success: boolean; message: string; email: string; expiresIn: number; maxAttempts: number }>(
+      `/rekomendasi-menu/${encodeURIComponent(menuId)}/approve/request-otp`,
+      { method: "POST" },
+    ),
+
+  /** Langkah 2 approve: setujui menu dengan kode OTP. */
+  approveMenu: (menuId: string, otp: string) =>
+    apiRequest<{ success: boolean; message: string; data: any }>(
+      `/rekomendasi-menu/${encodeURIComponent(menuId)}/approve`,
+      { method: "POST", body: JSON.stringify({ otp }) },
+    ),
 
   deleteMenu: async (menuId: string) => {
     return await apiFetch<{ success: boolean; message?: string }>(`/rekomendasi-menu/${menuId}`, {

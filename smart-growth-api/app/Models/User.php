@@ -17,23 +17,34 @@ class User extends Authenticatable
     protected $fillable = [
         'name',
         'username',
+        'email',
+        'email_verified_at',
         'password',
         'role',
         'status',
         'avatar_initials',
         'default_page',
         'api_token',
+        'otp_hash',
+        'otp_purpose',
+        'otp_expires_at',
+        'otp_attempts',
+        'otp_sent_at',
     ];
 
     protected $hidden = [
         'password',
         'remember_token',
+        'otp_hash',
     ];
 
     protected function casts(): array
     {
         return [
             'password' => 'hashed',
+            'email_verified_at' => 'datetime',
+            'otp_expires_at' => 'datetime',
+            'otp_sent_at' => 'datetime',
         ];
     }
 

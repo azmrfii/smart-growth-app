@@ -15,9 +15,16 @@ CREATE TABLE `users` (
   `id_user` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
   `name` varchar(255) NOT NULL,
   `username` varchar(100) NOT NULL,
+  `email` varchar(254) DEFAULT NULL,
+  `email_verified_at` timestamp NULL DEFAULT NULL,
   `password` varchar(255) NOT NULL,
   `role` enum('Super Admin','Tata Usaha','Admin dapur MBG','Ahli Gizi') NOT NULL DEFAULT 'Tata Usaha',
-  `status` enum('Aktif','Nonaktif','Deleted') NOT NULL DEFAULT 'Aktif',
+  `status` enum('Aktif','Nonaktif','Deleted','Menunggu Aktivasi') NOT NULL DEFAULT 'Aktif',
+  `otp_hash` varchar(255) DEFAULT NULL,
+  `otp_purpose` varchar(120) DEFAULT NULL,
+  `otp_expires_at` timestamp NULL DEFAULT NULL,
+  `otp_attempts` tinyint(3) UNSIGNED NOT NULL DEFAULT 0,
+  `otp_sent_at` timestamp NULL DEFAULT NULL,
   `avatar_initials` varchar(10) DEFAULT NULL,
   `default_page` varchar(255) NOT NULL DEFAULT '/data-anak',
   `api_token` varchar(80) DEFAULT NULL,
@@ -25,15 +32,16 @@ CREATE TABLE `users` (
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id_user`),
-  UNIQUE KEY `users_username_unique` (`username`)
+  UNIQUE KEY `users_username_unique` (`username`),
+  UNIQUE KEY `users_email_unique` (`email`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Initial Users (Password: password123 via bcrypt)
-INSERT INTO `users` (`id_user`, `name`, `username`, `password`, `role`, `status`, `avatar_initials`, `default_page`, `created_at`, `updated_at`) VALUES
-(1, 'Dimas Vikriansyah', 'dimas_vikrian', '$2y$12$8GG8BSyvrPHly55HwyRGcOGqeqyLWSg/B1pMNbVy1xw5XVPFWkeES', 'Super Admin', 'Aktif', 'DV', '/kelola-pengguna', NOW(), NOW()),
-(2, 'Siti Aminah', 'siti_aminah', '$2y$12$8GG8BSyvrPHly55HwyRGcOGqeqyLWSg/B1pMNbVy1xw5XVPFWkeES', 'Tata Usaha', 'Aktif', 'SA', '/data-anak', NOW(), NOW()),
-(3, 'Dr. Ratna Dewi', 'ratna_dewi', '$2y$12$8GG8BSyvrPHly55HwyRGcOGqeqyLWSg/B1pMNbVy1xw5XVPFWkeES', 'Ahli Gizi', 'Aktif', 'RD', '/rekomendasi-menu', NOW(), NOW()),
-(4, 'Budi Santoso', 'budi_santoso', '$2y$12$8GG8BSyvrPHly55HwyRGcOGqeqyLWSg/B1pMNbVy1xw5XVPFWkeES', 'Admin dapur MBG', 'Aktif', 'BS', '/laporan-menu', NOW(), NOW());
+INSERT INTO `users` (`id_user`, `name`, `username`, `email`, `email_verified_at`, `password`, `role`, `status`, `avatar_initials`, `default_page`, `created_at`, `updated_at`) VALUES
+(1, 'Dimas Vikriansyah', 'dimas_vikrian', 'dimas@smartgrowth.id', NOW(), '$2y$12$8GG8BSyvrPHly55HwyRGcOGqeqyLWSg/B1pMNbVy1xw5XVPFWkeES', 'Super Admin', 'Aktif', 'DV', '/kelola-pengguna', NOW(), NOW()),
+(2, 'Siti Aminah', 'siti_aminah', 'siti@smartgrowth.id', NOW(), '$2y$12$8GG8BSyvrPHly55HwyRGcOGqeqyLWSg/B1pMNbVy1xw5XVPFWkeES', 'Tata Usaha', 'Aktif', 'SA', '/data-anak', NOW(), NOW()),
+(3, 'Dr. Ratna Dewi', 'ratna_dewi', 'ratna@smartgrowth.id', NOW(), '$2y$12$8GG8BSyvrPHly55HwyRGcOGqeqyLWSg/B1pMNbVy1xw5XVPFWkeES', 'Ahli Gizi', 'Aktif', 'RD', '/rekomendasi-menu', NOW(), NOW()),
+(4, 'Budi Santoso', 'budi_santoso', 'budi@smartgrowth.id', NOW(), '$2y$12$8GG8BSyvrPHly55HwyRGcOGqeqyLWSg/B1pMNbVy1xw5XVPFWkeES', 'Admin dapur MBG', 'Aktif', 'BS', '/laporan-menu', NOW(), NOW());
 
 -- --------------------------------------------------------
 -- Table: personal_access_tokens (Token login Laravel Sanctum)

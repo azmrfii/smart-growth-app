@@ -10,6 +10,74 @@ use Illuminate\Http\Request;
 
 class AnakController extends Controller
 {
+    private const AGE_RE = '/^(\d{1,2})\s*(?:th|thn|tahun)?(?:\s*(\d{1,2})\s*(?:bln|bulan))?$/i';
+
+    private const MESSAGES = [
+        'name.required' => 'Nama anak wajib diisi.',
+        'name.min' => 'Nama anak minimal 3 karakter.',
+        'name.max' => 'Nama anak maksimal 100 karakter.',
+        'name.regex' => 'Nama anak hanya boleh berisi huruf, spasi, titik, apostrof, dan tanda hubung.',
+        'classLabel.required' => 'Kelas wajib diisi.',
+        'classLabel.min' => 'Kelas minimal 2 karakter.',
+        'classLabel.max' => 'Kelas maksimal 20 karakter.',
+        'classLabel.regex' => 'Kelas hanya boleh huruf, angka, dan spasi (contoh: TK A1).',
+        'gender.required' => 'Jenis kelamin wajib dipilih.',
+        'gender.in' => 'Jenis kelamin tidak valid.',
+        'ageDisplay.required' => 'Usia wajib diisi.',
+        'ageDisplay.regex' => 'Format usia tidak valid. Gunakan contoh: 5th 8bln atau 5.',
+        'heightCm.required' => 'Tinggi badan wajib diisi.',
+        'heightCm.numeric' => 'Tinggi badan harus berupa angka.',
+        'heightCm.between' => 'Tinggi badan harus antara 60 dan 160 cm.',
+        'weightKg.required' => 'Berat badan wajib diisi.',
+        'weightKg.numeric' => 'Berat badan harus berupa angka.',
+        'weightKg.between' => 'Berat badan harus antara 5 dan 80 kg.',
+        'alergi.required' => "Isi alergi, atau tulis '-' jika tidak ada.",
+        'alergi.max' => 'Alergi maksimal 200 karakter.',
+        'alergi.regex' => 'Alergi hanya boleh huruf, angka, koma, garis miring, dan tanda kurung.',
+    ];
+
+    /** Aturan dasar; $req = 'required' (tambah) atau 'sometimes' (ubah). */
+    private function rules(string $req): array
+    {
+        return [
+            'name' => [$req, 'string', 'min:3', 'max:100', "regex:/^[\\pL][\\pL .'-]*$/u"],
+            'classLabel' => [$req, 'string', 'min:2', 'max:20', 'regex:/^[A-Za-z0-9][A-Za-z0-9 ]*$/'],
+            'gender' => [$req, 'in:Laki-laki,Perempuan'],
+            'ageDisplay' => [$req, 'string', 'max:12', 'regex:' . self::AGE_RE],
+            'heightCm' => [$req, 'numeric', 'between:60,160'],
+            'weightKg' => [$req, 'numeric', 'between:5,80'],
+            'alergi' => [$req, 'string', 'max:200', 'regex:/^(-|[\\pL0-9 ,\\/()-]+)$/u'],
+        ];
+    }
+
+    /** Usia harus 3-7 tahun (cakupan standar WHO) dan bulan 0-11. Mengembalikan [bulan, teks] atau pesan error. */
+    private function parseAge(string $raw): array|string
+    {
+        preg_match(self::AGE_RE, trim($raw), $m);
+        $years = (int) ($m[1] ?? 0);
+        $months = (int) ($m[2] ?? 0);
+
+        if ($months > 11) {
+            return 'Jumlah bulan harus antara 0 sampai 11.';
+        }
+        if ($years < 3 || $years > 7) {
+            return 'Usia harus antara 3 dan 7 tahun (cakupan standar WHO).';
+        }
+
+        return [$years * 12 + $months, "{$years}th {$months}bln"];
+    }
+
+    private function normalize(Request $request): void
+    {
+        $clean = [];
+        foreach (['name', 'classLabel', 'ageDisplay', 'alergi'] as $key) {
+            if ($request->has($key) && is_string($request->input($key))) {
+                $clean[$key] = preg_replace('/\s+/', ' ', trim($request->input($key)));
+            }
+        }
+        $request->merge($clean);
+    }
+
     /**
      * Use Case #3: Mengelola Data Anak (FR-02) - List & search children
      */
@@ -89,20 +157,18 @@ class AnakController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'classLabel' => 'required|string|max:50',
-            'gender' => 'required|in:Laki-laki,Perempuan',
-            'ageDisplay' => 'nullable|string',
-            'ageYears' => 'nullable|numeric',
-            'heightCm' => 'required|numeric|min:30|max:200',
-            'weightKg' => 'required|numeric|min:2|max:150',
-            'alergi' => 'nullable|string',
-        ]);
+        $this->normalize($request);
+        $validated = $request->validate($this->rules('required'), self::MESSAGES);
 
-        $years = (int) ($validated['ageYears'] ?? 5);
-        $ageDisplay = $validated['ageDisplay'] ?? "{$years}th 0bln";
-        $ageMonths = $years * 12;
+        $age = $this->parseAge($validated['ageDisplay']);
+        if (is_string($age)) {
+            return response()->json([
+                'success' => false,
+                'message' => $age,
+                'errors' => ['ageDisplay' => [$age]],
+            ], 422);
+        }
+        [$ageMonths, $ageDisplay] = $age;
 
         $anak = Anak::create([
             'nama' => $validated['name'],
@@ -112,7 +178,7 @@ class AnakController extends Controller
             'usia_display' => $ageDisplay,
             'tinggi_badan' => $validated['heightCm'],
             'berat_badan' => $validated['weightKg'],
-            'alergi' => $validated['alergi'] ?: '-',
+            'alergi' => $validated['alergi'],
             'status_gizi' => 'Gizi Baik', // initial before calculation
         ]);
 
@@ -152,21 +218,24 @@ class AnakController extends Controller
         $idAnak = is_numeric($id) ? $id : (int) str_replace('kid-', '', $id);
         $anak = Anak::findOrFail($idAnak);
 
-        $validated = $request->validate([
-            'name' => 'sometimes|string|max:255',
-            'classLabel' => 'sometimes|string|max:50',
-            'gender' => 'sometimes|in:Laki-laki,Perempuan',
-            'ageDisplay' => 'nullable|string',
-            'heightCm' => 'sometimes|numeric|min:30|max:200',
-            'weightKg' => 'sometimes|numeric|min:2|max:150',
-            'alergi' => 'nullable|string',
-            'status' => 'nullable|string',
-        ]);
+        $this->normalize($request);
+        $validated = $request->validate($this->rules('sometimes'), self::MESSAGES);
+
+        if (isset($validated['ageDisplay'])) {
+            $age = $this->parseAge($validated['ageDisplay']);
+            if (is_string($age)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $age,
+                    'errors' => ['ageDisplay' => [$age]],
+                ], 422);
+            }
+            [$anak->usia_bulan, $anak->usia_display] = $age;
+        }
 
         if (isset($validated['name'])) $anak->nama = $validated['name'];
         if (isset($validated['classLabel'])) $anak->kelas = $validated['classLabel'];
         if (isset($validated['gender'])) $anak->jenis_kelamin = $validated['gender'];
-        if (isset($validated['ageDisplay'])) $anak->usia_display = $validated['ageDisplay'];
         if (isset($validated['heightCm'])) $anak->tinggi_badan = $validated['heightCm'];
         if (isset($validated['weightKg'])) $anak->berat_badan = $validated['weightKg'];
         if (isset($validated['alergi'])) $anak->alergi = $validated['alergi'];
