@@ -17,7 +17,10 @@ import { Navigate, useNavigate } from "react-router";
 
 import { useAppStore } from "@/lib/nutrition-store";
 import { USERS, validateLogin, type UserCredential } from "@/lib/users";
-import { SmartGrowthAPI } from "@/lib/api-client";
+import { apiRequest } from "@/lib/api-client";
+import { OtpActivationDialog } from "@/components/app-shell/OtpActivation";
+import { FieldError, fieldProps } from "@/components/app-shell/FieldError";
+import { hasErrors, validateLoginForm, type FieldErrors, type LoginFields } from "@/lib/validation";
 
 export function meta() {
   return [{ title: "Masuk - Sistem Manajemen Gizi Anak" }];
@@ -34,6 +37,10 @@ export default function MasukRoute() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors<LoginFields>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [activation, setActivation] = useState<{ email: string } | null>(null);
+  const [notice, setNotice] = useState("");
   const [showDemoUsers, setShowDemoUsers] = useState(false);
 
   useEffect(() => {
@@ -65,30 +72,52 @@ export default function MasukRoute() {
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!username.trim() || !password) {
-      setError("Username dan password wajib diisi.");
+    if (submitting) return;
+    const errors = validateLoginForm({ username, password });
+    setFieldErrors(errors);
+    if (hasErrors(errors)) {
+      setError("");
       return;
     }
 
+    setSubmitting(true);
     // Attempt login with Laravel Backend API first
-    const apiRes = await SmartGrowthAPI.login(username, password);
-    if (apiRes && apiRes.success && apiRes.data) {
+    const res = await apiRequest<any>("/login", {
+      method: "POST",
+      body: JSON.stringify({ username: username.trim(), password }),
+    });
+    if (res.ok && res.data?.data) {
+      const apiData = res.data.data;
       if (typeof window !== "undefined") {
-        localStorage.setItem("smart_growth_token", apiRes.data.token);
+        localStorage.setItem("smart_growth_token", apiData.token);
       }
       login({
-        id: apiRes.data.user.id,
-        username: apiRes.data.user.username,
-        name: apiRes.data.user.name,
-        role: apiRes.data.user.role,
-        avatarInitials: apiRes.data.user.avatarInitials,
-        defaultPage: apiRes.data.user.defaultPage,
+        id: apiData.user.id,
+        username: apiData.user.username,
+        name: apiData.user.name,
+        role: apiData.user.role,
+        avatarInitials: apiData.user.avatarInitials,
+        defaultPage: apiData.user.defaultPage,
       });
-      navigate(apiRes.data.user.defaultPage, { replace: true });
+      navigate(apiData.user.defaultPage, { replace: true });
       return;
     }
 
+    if (!res.ok && res.status !== 0) {
+      // Server menjawab: tampilkan alasannya (bukan fallback ke data demo lokal).
+      setSubmitting(false);
+      if (res.body?.code === "ACCOUNT_NOT_ACTIVATED") {
+        setActivation({ email: res.body.email || "" });
+        return;
+      }
+      setFieldErrors({ username: res.errors.username, password: res.errors.password });
+      setError(res.errors.username || res.errors.password ? "" : res.message);
+      return;
+    }
+
+    // Server offline -> mode demo memakai akun lokal.
     const matchedUser = validateLogin(username, password);
+    setSubmitting(false);
     if (!matchedUser) {
       setError("Username atau password salah. Silakan periksa kredensial.");
       return;
@@ -184,34 +213,45 @@ export default function MasukRoute() {
             <p className="mt-1.5 text-sm text-[#717182]">Silakan masuk ke akun Anda</p>
           </div>
 
-          <form onSubmit={handleSubmit} className="mt-7 flex flex-col gap-4">
+          <form onSubmit={handleSubmit} noValidate className="mt-7 flex flex-col gap-4">
             {/* Username Input */}
+            <div className="flex flex-col gap-1.5">
             <div className="relative flex items-center rounded-xl bg-[#F3F4F6] border border-transparent transition-all focus-within:border-[#0891B2] focus-within:bg-white focus-within:ring-2 focus-within:ring-[#0891B2]/20">
               <IconUser size={18} stroke={1.75} className="ml-3.5 text-[#9CA3AF] pointer-events-none" />
               <input
                 type="text"
-                required
+                autoComplete="username"
+                maxLength={30}
+                {...fieldProps("login-username", fieldErrors.username)}
                 value={username}
                 onChange={(e) => {
                   setUsername(e.target.value);
                   setError("");
+                  setNotice("");
+                  setFieldErrors((f) => ({ ...f, username: undefined }));
                 }}
                 placeholder="Masukkan username"
                 aria-label="Username"
                 className="h-12 w-full bg-transparent pl-3 pr-4 text-sm text-[#0A0A0A] placeholder:text-[#9CA3AF] outline-none"
               />
             </div>
+            <FieldError id="login-username-error" message={fieldErrors.username} />
+            </div>
 
             {/* Password Input */}
+            <div className="flex flex-col gap-1.5">
             <div className="relative flex items-center rounded-xl bg-[#F3F4F6] border border-transparent transition-all focus-within:border-[#0891B2] focus-within:bg-white focus-within:ring-2 focus-within:ring-[#0891B2]/20">
               <IconLock size={18} stroke={1.75} className="ml-3.5 text-[#9CA3AF] pointer-events-none" />
               <input
                 type={showPassword ? "text" : "password"}
-                required
+                autoComplete="current-password"
+                maxLength={72}
+                {...fieldProps("login-password", fieldErrors.password)}
                 value={password}
                 onChange={(e) => {
                   setPassword(e.target.value);
                   setError("");
+                  setFieldErrors((f) => ({ ...f, password: undefined }));
                 }}
                 placeholder="Masukkan password"
                 aria-label="Password"
@@ -226,6 +266,8 @@ export default function MasukRoute() {
                 {showPassword ? <IconEyeOff size={18} /> : <IconEye size={18} />}
               </button>
             </div>
+            <FieldError id="login-password-error" message={fieldErrors.password} />
+            </div>
 
             {error ? (
               <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-medium text-[#D4183D]">
@@ -233,15 +275,33 @@ export default function MasukRoute() {
               </div>
             ) : null}
 
+            {notice ? (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-medium text-emerald-700">
+                {notice}
+              </div>
+            ) : null}
+
             {/* Submit Button */}
             <button
               type="submit"
-              className="mt-2 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#0891B2] px-6 text-sm font-semibold text-white shadow-[0_4px_14px_0_rgba(8,145,178,0.38)] transition-all hover:bg-[#0E7490] hover:shadow-[0_6px_20px_0_rgba(8,145,178,0.48)] active:scale-[0.99]"
+              disabled={submitting}
+              className="mt-2 flex h-12 disabled:opacity-70 w-full items-center justify-center gap-2 rounded-xl bg-[#0891B2] px-6 text-sm font-semibold text-white shadow-[0_4px_14px_0_rgba(8,145,178,0.38)] transition-all hover:bg-[#0E7490] hover:shadow-[0_6px_20px_0_rgba(8,145,178,0.48)] active:scale-[0.99]"
             >
               <span>Masuk</span>
               <IconArrowRight size={18} stroke={2.5} />
             </button>
           </form>
+
+          <p className="mt-4 text-center text-xs text-[#717182]">
+            Akun baru?{" "}
+            <button
+              type="button"
+              onClick={() => setActivation({ email: "" })}
+              className="font-semibold text-[#0891B2] hover:text-[#0E7490]"
+            >
+              Aktivasi dengan kode OTP
+            </button>
+          </p>
 
           {/* Quick Demo Accounts Drawer / Accordion */}
           <div className="mt-6 border-t border-slate-100 pt-4">
@@ -284,6 +344,17 @@ export default function MasukRoute() {
           </div>
         </div>
       </div>
+      {activation ? (
+        <OtpActivationDialog
+          initialEmail={activation.email}
+          onClose={() => setActivation(null)}
+          onActivated={(message) => {
+            setActivation(null);
+            setError("");
+            setNotice(message);
+          }}
+        />
+      ) : null}
     </main>
   );
 }

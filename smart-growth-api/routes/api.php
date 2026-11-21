@@ -38,6 +38,10 @@ Route::get('/ping', function () {
 // FR-01 Login. Dibatasi 10 percobaan per menit per IP (mencegah tebak password).
 Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
 
+// Aktivasi akun via OTP email (publik; dibatasi agar OTP tidak bisa ditebak).
+Route::post('/activate', [AuthController::class, 'activate'])->middleware('throttle:10,1');
+Route::post('/activate/resend', [AuthController::class, 'resendOtp'])->middleware('throttle:3,1');
+
 // Unduh laporan (HTML siap cetak). Masih publik karena frontend membukanya
 // lewat window.open() yang tidak bisa mengirim token. Isinya hanya jadwal menu,
 // tanpa data pribadi anak. (Lihat catatan di README untuk pengembangan berikutnya.)
@@ -85,7 +89,9 @@ Route::middleware(['auth:sanctum', 'role'])->group(function () {
         Route::get('/rekomendasi-menu', [RekomendasiMenuController::class, 'index']);
         Route::post('/rekomendasi-menu/generate', [RekomendasiMenuController::class, 'generate']);
         Route::post('/rekomendasi-menu/draft', [RekomendasiMenuController::class, 'saveDraft']);
-        Route::post('/rekomendasi-menu/{id}/approve', [RekomendasiMenuController::class, 'approve']);
+        // Approve menu 2 langkah: minta OTP ke email -> kirim OTP bersama approve.
+        Route::post('/rekomendasi-menu/{id}/approve/request-otp', [RekomendasiMenuController::class, 'requestApprovalOtp'])->middleware('throttle:5,1');
+        Route::post('/rekomendasi-menu/{id}/approve', [RekomendasiMenuController::class, 'approve'])->middleware('throttle:10,1');
         Route::delete('/rekomendasi-menu/{id}', [RekomendasiMenuController::class, 'destroy']);
     });
 
