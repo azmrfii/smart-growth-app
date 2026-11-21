@@ -14,6 +14,7 @@ import {
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { ConfirmDialog, Modal } from "@/components/app-shell/Modal";
+import { ApproveMenuOtpDialog } from "@/components/app-shell/ApproveMenuOtpDialog";
 import { SmartGrowthAPI } from "@/lib/api-client";
 import { FieldError, fieldProps } from "@/components/app-shell/FieldError";
 import { hasErrors, parseNumber, validateFoodForm, type FieldErrors, type FoodFields } from "@/lib/validation";
@@ -187,6 +188,8 @@ function AddFoodDialog({ day, onAddFood, onClose }: { day: Day; onAddFood: (food
   const [carbs, setCarbs] = useState("");
   const [fat, setFat] = useState("");
   const [errors, setErrors] = useState<FieldErrors<FoodFields>>({});
+  const [serverError, setServerError] = useState("");
+  const [saving, setSaving] = useState(false);
   const bind = (field: FoodFields, setter: (v: string) => void) => ({
     ...fieldProps(`food-${field}`, errors[field]),
     onChange: (event: { target: { value: string } }) => {
@@ -195,8 +198,10 @@ function AddFoodDialog({ day, onAddFood, onClose }: { day: Day; onAddFood: (food
     },
   });
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (saving) return;
+    setServerError("");
     if (existingId) {
       if (!foods.some((food) => food.id === existingId)) return;
       onAddFood(existingId);
@@ -214,7 +219,22 @@ function AddFoodDialog({ day, onAddFood, onClose }: { day: Day; onAddFood: (food
       carbs: values[2],
       fat: values[3],
     };
-    const food = addFood(input);
+    // Simpan ke server dulu agar menu yang disimpan merujuk bahan yang ada di database.
+    setSaving(true);
+    const res = await SmartGrowthAPI.addFood(input);
+    setSaving(false);
+    if (!res.ok && res.status !== 0) {
+      setErrors(res.errors as FieldErrors<FoodFields>);
+      setServerError(hasErrors(res.errors) ? "" : res.message);
+      return;
+    }
+    let food: Food;
+    if (res.ok) {
+      food = res.data.data as Food;
+      useAppStore.setState((state) => ({ foods: [...state.foods, food] }));
+    } else {
+      food = addFood(input); // server offline -> mode demo lokal
+    }
     onAddFood(food.id);
     notify("Notification", `Bahan baru "${food.name}" ditambahkan ke menu ${day}`);
   };
@@ -263,12 +283,18 @@ function AddFoodDialog({ day, onAddFood, onClose }: { day: Day; onAddFood: (food
         </fieldset>
 
 
+        {serverError ? (
+          <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-medium text-[#D4183D]">
+            {serverError}
+          </p>
+        ) : null}
+
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="h-9 rounded-lg border border-black/10 bg-white px-4 text-sm text-[#0A0A0A] hover:bg-black/5">
             Batal
           </button>
-          <button type="submit" className="h-9 rounded-lg bg-[#0891B2] px-4 text-sm text-white hover:bg-[#0E7490]">
-            Simpan
+          <button type="submit" disabled={saving} className="h-9 rounded-lg bg-[#0891B2] px-4 text-sm text-white hover:bg-[#0E7490] disabled:opacity-70">
+            {saving ? "Menyimpan..." : "Simpan"}
           </button>
         </div>
       </form>
@@ -293,6 +319,7 @@ export default function RekomendasiMenuRoute() {
   const [viewingMenuId, setViewingMenuId] = useState<string | null>(null);
   const [viewDay, setViewDay] = useState<Day>("Senin");
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [approvingMenu, setApprovingMenu] = useState<WeeklyMenu | null>(null);
 
   useEffect(() => {
     SmartGrowthAPI.getFoods().then((res) => {
@@ -356,10 +383,20 @@ export default function RekomendasiMenuRoute() {
     setShowAddFood(false);
   };
 
-  const handleSubmitDraft = (menu: WeeklyMenu) => {
-    submitMenu(menu.id);
-    SmartGrowthAPI.approveMenu(menu.id).catch(() => {});
+  // Approve wajib dikonfirmasi OTP email (lihat ApproveMenuOtpDialog).
+  const handleSubmitDraft = (menu: WeeklyMenu) => setApprovingMenu(menu);
+
+  const markApproved = (menu: WeeklyMenu, message: string) => {
+    useAppStore.setState((state) => ({
+      menus: state.menus.map((m) =>
+        m.id === menu.id
+          ? { ...m, status: "submitted", createdAt: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) }
+          : m,
+      ),
+    }));
+    notify("Notification", message);
     if (builder.id === menu.id) setBuilder({ days: createEmptyDayMenu() });
+    setApprovingMenu(null);
   };
 
   const tabs: { value: Tab; label: string }[] = [
@@ -498,7 +535,7 @@ export default function RekomendasiMenuRoute() {
                   </button>
                   <button type="button" onClick={() => handleSubmitDraft(menu)} className={OUTLINE_BUTTON}>
                     <IconSend size={16} stroke={1.33} />
-                    Submit
+                    Approve
                   </button>
                   <button
                     type="button"
@@ -595,6 +632,20 @@ export default function RekomendasiMenuRoute() {
             if (builder.id === pendingDelete.id) setBuilder({ days: createEmptyDayMenu() });
             notify("Notification", "Draft menu berhasil dihapus");
             setPendingDeleteId(null);
+          }}
+        />
+      ) : null}
+      {approvingMenu ? (
+        <ApproveMenuOtpDialog
+          menuId={approvingMenu.id}
+          menuTitle={approvingMenu.title}
+          onClose={() => setApprovingMenu(null)}
+          onApproved={(message) => markApproved(approvingMenu, message)}
+          onOffline={() => {
+            // Server offline: mode demo lokal tanpa OTP (tidak ada data server yang berubah).
+            submitMenu(approvingMenu.id);
+            if (builder.id === approvingMenu.id) setBuilder({ days: createEmptyDayMenu() });
+            setApprovingMenu(null);
           }}
         />
       ) : null}

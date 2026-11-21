@@ -89,7 +89,9 @@ Route::middleware(['auth:sanctum', 'role'])->group(function () {
         Route::get('/rekomendasi-menu', [RekomendasiMenuController::class, 'index']);
         Route::post('/rekomendasi-menu/generate', [RekomendasiMenuController::class, 'generate']);
         Route::post('/rekomendasi-menu/draft', [RekomendasiMenuController::class, 'saveDraft']);
-        Route::post('/rekomendasi-menu/{id}/approve', [RekomendasiMenuController::class, 'approve']);
+        // Approve menu 2 langkah: minta OTP ke email -> kirim OTP bersama approve.
+        Route::post('/rekomendasi-menu/{id}/approve/request-otp', [RekomendasiMenuController::class, 'requestApprovalOtp'])->middleware('throttle:5,1');
+        Route::post('/rekomendasi-menu/{id}/approve', [RekomendasiMenuController::class, 'approve'])->middleware('throttle:10,1');
         Route::delete('/rekomendasi-menu/{id}', [RekomendasiMenuController::class, 'destroy']);
     });
 

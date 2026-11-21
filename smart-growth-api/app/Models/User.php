@@ -26,6 +26,7 @@ class User extends Authenticatable
         'default_page',
         'api_token',
         'otp_hash',
+        'otp_purpose',
         'otp_expires_at',
         'otp_attempts',
         'otp_sent_at',

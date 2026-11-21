@@ -170,19 +170,17 @@ export const SmartGrowthAPI = {
     return await apiFetch<{ success: boolean; data: any[] }>("/anak");
   },
 
-  addKid: async (data: any) => {
-    return await apiFetch<{ success: boolean; message?: string; data: any }>("/anak", {
+  addKid: (data: any) =>
+    apiRequest<{ success: boolean; message?: string; data: any }>("/anak", {
       method: "POST",
       body: JSON.stringify(data),
-    });
-  },
+    }),
 
-  updateKid: async (id: string, data: any) => {
-    return await apiFetch<{ success: boolean; message?: string; data: any }>(`/anak/${id}`, {
+  updateKid: (id: string, data: any) =>
+    apiRequest<{ success: boolean; message?: string; data: any }>(`/anak/${encodeURIComponent(id)}`, {
       method: "PUT",
       body: JSON.stringify(data),
-    });
-  },
+    }),
 
   deleteKid: async (id: string) => {
     return await apiFetch<{ success: boolean; message?: string }>(`/anak/${id}`, {
@@ -213,6 +211,13 @@ export const SmartGrowthAPI = {
     return await apiFetch<{ success: boolean; data: any[] }>("/foods");
   },
 
+  /** Tambah bahan makanan baru (divalidasi juga di server). */
+  addFood: (data: { name: string; calories: number; protein: number; carbs: number; fat: number }) =>
+    apiRequest<{ success: boolean; message?: string; data: any }>("/foods", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
   getMenus: async () => {
     return await apiFetch<{ success: boolean; data: any[] }>("/rekomendasi-menu");
   },
@@ -230,11 +235,19 @@ export const SmartGrowthAPI = {
     });
   },
 
-  approveMenu: async (menuId: string) => {
-    return await apiFetch<{ success: boolean; data: any }>(`/rekomendasi-menu/${menuId}/approve`, {
-      method: "POST",
-    });
-  },
+  /** Langkah 1 approve: kirim OTP ke email penyetuju. */
+  requestApproveMenuOtp: (menuId: string) =>
+    apiRequest<{ success: boolean; message: string; email: string; expiresIn: number; maxAttempts: number }>(
+      `/rekomendasi-menu/${encodeURIComponent(menuId)}/approve/request-otp`,
+      { method: "POST" },
+    ),
+
+  /** Langkah 2 approve: setujui menu dengan kode OTP. */
+  approveMenu: (menuId: string, otp: string) =>
+    apiRequest<{ success: boolean; message: string; data: any }>(
+      `/rekomendasi-menu/${encodeURIComponent(menuId)}/approve`,
+      { method: "POST", body: JSON.stringify({ otp }) },
+    ),
 
   deleteMenu: async (menuId: string) => {
     return await apiFetch<{ success: boolean; message?: string }>(`/rekomendasi-menu/${menuId}`, {

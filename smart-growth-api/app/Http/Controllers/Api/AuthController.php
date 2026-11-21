@@ -206,7 +206,7 @@ class AuthController extends Controller
             return $generic;
         }
 
-        $result = $otp->verify($user, $request->input('otp'));
+        $result = $otp->verifyActivation($user, $request->input('otp'));
 
         if ($result === OtpService::OK) {
             AuditLog::record('AKTIVASI_AKUN', "Pengguna {$user->name} ({$user->username}) mengaktifkan akun via OTP email", $user, $request->ip());
@@ -225,7 +225,7 @@ class AuthController extends Controller
         }
 
         if ($result === OtpService::INVALID) {
-            $left = OtpService::MAX_ATTEMPTS - $user->otp_attempts;
+            $left = $otp->attemptsLeft($user, OtpService::ACTIVATION_MAX_ATTEMPTS);
 
             return response()->json([
                 'success' => false,
@@ -250,9 +250,9 @@ class AuthController extends Controller
 
         $user = User::where('email', $request->input('email'))->where('status', 'Menunggu Aktivasi')->first();
 
-        if ($user && $otp->resendWaitSeconds($user) === 0) {
+        if ($user && $otp->resendWaitSeconds($user, OtpService::activationPurpose()) === 0) {
             try {
-                $otp->issue($user);
+                $otp->issueActivation($user);
             } catch (\Throwable $e) {
                 report($e);
 

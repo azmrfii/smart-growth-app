@@ -288,6 +288,7 @@ export default function KelolaPenggunaRoute() {
           <IconSearch size={18} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
+            maxLength={100}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Cari nama atau username..."

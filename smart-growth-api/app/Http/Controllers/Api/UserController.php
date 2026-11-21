@@ -131,7 +131,7 @@ class UserController extends Controller
                     'avatar_initials' => $initials,
                     'default_page' => User::getDefaultPageForRole($validated['role']),
                 ]);
-                $otp->issue($user);
+                $otp->issueActivation($user);
 
                 return $user;
             });

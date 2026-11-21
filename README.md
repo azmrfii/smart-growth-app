@@ -85,6 +85,17 @@ Saat pengembangan `MAIL_MAILER=log`, jadi email OTP tidak benar-benar terkirim â
 
 > Skema tabel `users` bertambah kolom `email`, `email_verified_at`, `otp_*` dan status `Menunggu Aktivasi`. Jalankan ulang `php artisan migrate:fresh --seed` atau import ulang `database/smart_growth.sql`.
 
+### OTP untuk Approve Menu
+
+Saat Ahli Gizi menekan **Approve** pada draft menu, sistem mengirim kode OTP ke email akun yang sedang login. Menu baru disetujui (dan dikirim ke Admin Dapur MBG) setelah kode dimasukkan.
+
+- Kode berlaku **5 menit**, maksimal **3 kali salah** (setelah itu terkunci, harus minta kode baru), kirim ulang berjeda 60 detik.
+- Kode hanya berlaku untuk menu yang diminta; kode aktivasi akun tidak bisa dipakai di sini (kolom `users.otp_purpose`).
+- Tercatat di `audit_logs`: `MINTA_OTP_APPROVE_MENU`, `APPROVE_MENU_DIBLOKIR` (3x salah), dan `APPROVE_MENU` (berhasil).
+- Endpoint: `POST /api/rekomendasi-menu/{id}/approve/request-otp` lalu `POST /api/rekomendasi-menu/{id}/approve` dengan `{"otp": "123456"}`.
+
+Logika OTP dipakai bersama aktivasi akun: `smart-growth-api/app/Services/OtpService.php`.
+
 ### Menjalankan Pengujian
 ```bash
 pnpm exec vitest --run                  # unit test validasi frontend

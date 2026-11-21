@@ -21,6 +21,7 @@ CREATE TABLE `users` (
   `role` enum('Super Admin','Tata Usaha','Admin dapur MBG','Ahli Gizi') NOT NULL DEFAULT 'Tata Usaha',
   `status` enum('Aktif','Nonaktif','Deleted','Menunggu Aktivasi') NOT NULL DEFAULT 'Aktif',
   `otp_hash` varchar(255) DEFAULT NULL,
+  `otp_purpose` varchar(120) DEFAULT NULL,
   `otp_expires_at` timestamp NULL DEFAULT NULL,
   `otp_attempts` tinyint(3) UNSIGNED NOT NULL DEFAULT 0,
   `otp_sent_at` timestamp NULL DEFAULT NULL,

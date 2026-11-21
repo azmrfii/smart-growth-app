@@ -28,6 +28,8 @@ return new class extends Migration
             $table->enum('status', ['Aktif', 'Nonaktif', 'Deleted', 'Menunggu Aktivasi'])->default('Aktif');
             // OTP aktivasi: hanya hash-nya yang disimpan, berlaku singkat, dan dibatasi percobaannya.
             $table->string('otp_hash')->nullable();
+            // Tujuan OTP: 'activation' atau 'approve_menu:{id}' (kode hanya berlaku untuk tujuannya).
+            $table->string('otp_purpose', 120)->nullable();
             $table->timestamp('otp_expires_at')->nullable();
             $table->unsignedTinyInteger('otp_attempts')->default(0);
             $table->timestamp('otp_sent_at')->nullable();

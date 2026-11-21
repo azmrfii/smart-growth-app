@@ -72,6 +72,8 @@ export default function DataAnakRoute() {
   const [editingKid, setEditingKid] = useState<Kid | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [errors, setErrors] = useState<FieldErrors<KidFields>>({});
+  const [serverError, setServerError] = useState("");
+  const [saving, setSaving] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -130,8 +132,10 @@ export default function DataAnakRoute() {
     setErrors({});
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (saving) return;
+    setServerError("");
     const found = validateKidForm(form, { genders: GENDERS, statuses: NUTRITION_STATUSES });
     setErrors(found);
     if (hasErrors(found)) return;
@@ -152,20 +156,35 @@ export default function DataAnakRoute() {
       alergi: form.alergi.trim() || "-",
     };
 
+    // Simpan ke server dulu; data lokal hanya diubah bila server menerima
+    // (atau server offline -> mode demo lokal).
+    setSaving(true);
+    const res = editingKid
+      ? await SmartGrowthAPI.updateKid(editingKid.id, kidData)
+      : await SmartGrowthAPI.addKid(kidData);
+    setSaving(false);
+
+    if (!res.ok && res.status !== 0) {
+      setErrors(res.errors as FieldErrors<KidFields>);
+      setServerError(hasErrors(res.errors) ? "" : res.message);
+      return;
+    }
+
+    const saved: Kid | null = res.ok ? res.data.data : null;
     if (editingKid) {
-      updateKid(editingKid.id, kidData);
-      SmartGrowthAPI.updateKid(editingKid.id, kidData).catch(() => {});
-      notify("Data Diperbarui", `Data ${form.name} berhasil diperbarui`);
+      if (saved) {
+        useAppStore.setState((s) => ({ kids: s.kids.map((k) => (k.id === editingKid.id ? saved : k)) }));
+      } else {
+        updateKid(editingKid.id, kidData);
+      }
+      notify("Data Diperbarui", `Data ${kidData.name} berhasil diperbarui${saved ? "" : " (mode offline)"}`);
     } else {
-      addKid(kidData);
-      SmartGrowthAPI.addKid(kidData).then((res) => {
-        if (res && res.data) {
-          useAppStore.setState((s) => ({
-            kids: s.kids.map((k) => (k.name === kidData.name ? { ...k, id: res.data.id } : k)),
-          }));
-        }
-      }).catch(() => {});
-      notify("Data Ditambahkan", `Data anak ${form.name} berhasil ditambahkan`);
+      if (saved) {
+        useAppStore.setState((s) => ({ kids: [saved, ...s.kids] }));
+      } else {
+        addKid(kidData);
+      }
+      notify("Data Ditambahkan", `Data anak ${kidData.name} berhasil ditambahkan${saved ? "" : " (mode offline)"}`);
     }
 
     closeForm();
@@ -218,6 +237,7 @@ export default function DataAnakRoute() {
               />
               <input
                 type="search"
+                maxLength={100}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Cari nama"
@@ -487,6 +507,11 @@ export default function DataAnakRoute() {
                 Periksa kembali isian yang ditandai merah.
               </p>
             ) : null}
+            {serverError ? (
+              <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-medium text-[#D4183D] sm:col-span-2">
+                {serverError}
+              </p>
+            ) : null}
 
             <div className="mt-2 flex justify-end gap-2 sm:col-span-2">
               <button
@@ -498,9 +523,10 @@ export default function DataAnakRoute() {
               </button>
               <button
                 type="submit"
-                className="h-9 rounded-lg bg-[#0891B2] px-4 text-sm font-medium text-white hover:bg-[#0E7490]"
+                disabled={saving}
+                className="h-9 rounded-lg bg-[#0891B2] px-4 text-sm font-medium text-white hover:bg-[#0E7490] disabled:opacity-70"
               >
-                Simpan
+                {saving ? "Menyimpan..." : "Simpan"}
               </button>
             </div>
           </form>
