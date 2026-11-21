@@ -22,5 +22,7 @@
         <env name="DB_DATABASE" value=":memory:"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
+        <!-- Tes tidak boleh mengirim email sungguhan walau .env memakai SMTP. -->
+        <env name="MAIL_MAILER" value="array"/>
     </php>
 </phpunit>

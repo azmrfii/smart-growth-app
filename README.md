@@ -81,7 +81,27 @@ Kode: `app/lib/validation.ts` (frontend) dan `rules`/`validate()` di tiap contro
 
 Keamanan OTP: dibuat dengan `random_int` (CSPRNG), hanya **hash**-nya yang disimpan, berlaku **10 menit**, **sekali pakai**, maksimal **5 kali salah** lalu terkunci, kirim ulang berjeda **60 detik**, endpoint dibatasi throttle, dan respons tidak membocorkan email mana yang terdaftar.
 
-Saat pengembangan `MAIL_MAILER=log`, jadi email OTP tidak benar-benar terkirim — isinya tertulis di `smart-growth-api/storage/logs/laravel.log`. Untuk mengirim email sungguhan, isi konfigurasi SMTP (`MAIL_MAILER=smtp`, `MAIL_HOST`, dst.) di `.env`.
+Bawaannya `MAIL_MAILER=log`, jadi email OTP tidak benar-benar terkirim — isinya tertulis di `smart-growth-api/storage/logs/laravel.log` (cari baris `letter-spacing:6px`).
+
+### Mengirim email OTP sungguhan (Gmail SMTP)
+
+1. Aktifkan **Verifikasi 2 Langkah** di akun Google pengirim.
+2. Buat **App Password** di https://myaccount.google.com/apppasswords (16 huruf). **Jangan** pakai password akun Gmail biasa.
+3. Ubah bagian email di `smart-growth-api/.env`:
+   ```env
+   MAIL_MAILER=smtp
+   MAIL_SCHEME=smtp
+   MAIL_HOST=smtp.gmail.com
+   MAIL_PORT=587
+   MAIL_USERNAME=alamatkamu@gmail.com
+   MAIL_PASSWORD=abcdefghijklmnop        # App Password, TANPA spasi
+   MAIL_FROM_ADDRESS="${MAIL_USERNAME}"  # Gmail hanya mengizinkan pengirim = akun yang login
+   MAIL_FROM_NAME="Smart Growth"
+   ```
+4. Uji: `cd smart-growth-api && php artisan mail:test` (atau `php artisan mail:test nama@domain.com`). Password tidak pernah ditampilkan.
+5. Akun demo memakai email `@smartgrowth.id` yang tidak sungguhan — ganti email akun yang akan diuji lewat **Kelola Pengguna** ke alamat yang bisa dibuka.
+
+`.env` tidak ikut git, jadi App Password tidak akan ter-commit. `php artisan test` selalu memakai mailer palsu (`phpunit.xml`), jadi tes tidak pernah mengirim email sungguhan.
 
 > Skema tabel `users` bertambah kolom `email`, `email_verified_at`, `otp_*` dan status `Menunggu Aktivasi`. Jalankan ulang `php artisan migrate:fresh --seed` atau import ulang `database/smart_growth.sql`.
 
