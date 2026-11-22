@@ -123,4 +123,4 @@ cd smart-growth-api && php artisan test # tes keamanan + validasi + OTP backend
 ```
 
 ---
-*© 2025 Sistem Manajemen Gizi Anak - Platform Monitoring Gizi Berbasis WHO Z-Score*
+*© 2026 Sistem Manajemen Gizi Anak - Platform Monitoring Gizi Berbasis WHO Z-Score*
