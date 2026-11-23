@@ -1,17 +1,26 @@
 import { IconInfoCircle, IconX } from "@tabler/icons-react";
+import { useEffect } from "react";
 
 import { useAppStore } from "@/lib/nutrition-store";
+
+const AUTO_DISMISS_MS = 4000;
 
 export function Toasts() {
   const notices = useAppStore((state) => state.notices);
   const dismissNotice = useAppStore((state) => state.dismissNotice);
+
+  useEffect(() => {
+    if (notices.length === 0) return;
+    const timers = notices.map((notice) => setTimeout(() => dismissNotice(notice.id), AUTO_DISMISS_MS));
+    return () => timers.forEach(clearTimeout);
+  }, [notices, dismissNotice]);
 
   if (notices.length === 0) return null;
 
   return (
     <div
       aria-live="polite"
-      className="pointer-events-none fixed top-4 right-4 z-[60] flex w-[300px] flex-col gap-3"
+      className="pointer-events-none fixed top-4 right-4 left-4 z-[60] flex flex-col gap-3 sm:left-auto sm:w-[320px]"
     >
       {notices.map((notice) => (
         <div
