@@ -1,7 +1,12 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-import { type NutritionStatus } from "@/lib/nutrition-status";
+import {
+  DEFAULT_WHO_TABLE,
+  calculateStatusGizi,
+  type NutritionStatus,
+  type WhoStandardRow,
+} from "@/lib/nutrition-status";
 
 export const DAYS = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"] as const;
 export type Day = (typeof DAYS)[number];
@@ -22,7 +27,8 @@ export type Kid = {
   status: NutritionStatus;
   alergi: string;
 };
-export type KidInput = Omit<Kid, "id">;
+
+export type KidInput = Omit<Kid, "id" | "status">;
 
 export type Food = {
   id: string;
@@ -52,7 +58,7 @@ export const createEmptyDayMenu = (): DayMenu => ({
   Rabu: [],
   Kamis: [],
   Jumat: [],
-  });
+});
 
 const createId = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -108,7 +114,7 @@ const SEED_KIDS: SeedKid[] = [
 ];
 
 const SEED_KID_RECORDS: Kid[] = SEED_KIDS.map(
-  ([name, classLabel, gender, ageYears, heightCm, weightKg, status, alergi, ageDisplay], index) => ({
+  ([name, classLabel, gender, ageYears, heightCm, weightKg, _seedStatus, alergi, ageDisplay], index) => ({
     id: `kid-${index + 1}`,
     name,
     classLabel,
@@ -117,7 +123,7 @@ const SEED_KID_RECORDS: Kid[] = SEED_KIDS.map(
     ageDisplay,
     heightCm,
     weightKg,
-    status,
+    status: calculateStatusGizi({ gender, ageDisplay, heightCm, weightKg }, DEFAULT_WHO_TABLE).status,
     alergi: alergi || "-",
   }),
 );
@@ -170,6 +176,7 @@ type AppState = {
   foods: Food[];
   menus: WeeklyMenu[];
   notices: Notice[];
+  standards: WhoStandardRow[];
 };
 
 type AppActions = {
@@ -185,6 +192,8 @@ type AppActions = {
   notify: (title: string, body: string) => void;
   dismissNotice: (id: string) => void;
   resetKidsData: () => void;
+  setStandards: (rows: WhoStandardRow[]) => void;
+  recalculateAllKidStatuses: () => void;
 };
 
 export const useAppStore = create<AppState & AppActions>()(
@@ -196,7 +205,8 @@ export const useAppStore = create<AppState & AppActions>()(
       kids: SEED_KID_RECORDS,
       foods: SEED_FOODS,
       menus: SEED_MENUS,
-      notices: [{ id: "notice-approved", title: "Notification", body: "Menu telah di approve" }],
+      notices: [],
+      standards: DEFAULT_WHO_TABLE,
 
       login: (userOrUsername) => {
         if (typeof userOrUsername === "string") {
@@ -221,13 +231,30 @@ export const useAppStore = create<AppState & AppActions>()(
           });
         }
       },
-      logout: () => set({ isLoggedIn: false, username: "", currentUser: null }),
+
+      logout: () => {
+        if (typeof window !== "undefined") localStorage.removeItem("smart_growth_token");
+        set({ isLoggedIn: false, username: "", currentUser: null, notices: [] });
+      },
 
       addKid: (input) =>
-        set((state) => ({ kids: [{ id: createId("kid"), ...input }, ...state.kids] })),
+        set((state) => ({
+          kids: [
+            {
+              id: createId("kid"),
+              ...input,
+              status: calculateStatusGizi(input, state.standards).status,
+            },
+            ...state.kids,
+          ],
+        })),
       updateKid: (id, input) =>
         set((state) => ({
-          kids: state.kids.map((kid) => (kid.id === id ? { ...kid, ...input } : kid)),
+          kids: state.kids.map((kid) => {
+            if (kid.id !== id) return kid;
+            const merged = { ...kid, ...input };
+            return { ...merged, status: calculateStatusGizi(merged, state.standards).status };
+          }),
         })),
       deleteKid: (id) => set((state) => ({ kids: state.kids.filter((kid) => kid.id !== id) })),
 
@@ -268,7 +295,18 @@ export const useAppStore = create<AppState & AppActions>()(
 
       deleteMenu: (id) => set((state) => ({ menus: state.menus.filter((menu) => menu.id !== id) })),
 
-      resetKidsData: () => set({ kids: SEED_KID_RECORDS }),
+      resetKidsData: () => set({ kids: SEED_KID_RECORDS, standards: DEFAULT_WHO_TABLE }),
+      setStandards: (rows) => {
+        set({ standards: rows });
+        get().recalculateAllKidStatuses();
+      },
+      recalculateAllKidStatuses: () =>
+        set((state) => ({
+          kids: state.kids.map((kid) => ({
+            ...kid,
+            status: calculateStatusGizi(kid, state.standards).status,
+          })),
+        })),
       notify: (title, body) =>
         set((state) => ({ notices: [...state.notices, { id: createId("notice"), title, body }] })),
       dismissNotice: (id) =>
@@ -276,16 +314,22 @@ export const useAppStore = create<AppState & AppActions>()(
     }),
     {
       name: "sistem-gizi-app",
-      version: 3,
+      version: 4,
       storage: createJSONStorage(() => localStorage),
       migrate: (persistedState: any, version: number) => {
         if (version < 3 || !persistedState?.kids || persistedState.kids.length === 0 || !persistedState.kids[0]?.alergi) {
           return {
             ...persistedState,
             kids: SEED_KID_RECORDS,
+            standards: DEFAULT_WHO_TABLE,
           };
         }
-        return persistedState;
+        const standards = persistedState.standards?.length ? persistedState.standards : DEFAULT_WHO_TABLE;
+        return {
+          ...persistedState,
+          standards,
+          kids: persistedState.kids.map((kid: Kid) => ({ ...kid, status: calculateStatusGizi(kid, standards).status })),
+        };
       },
       partialize: (state) => ({
         isLoggedIn: state.isLoggedIn,
@@ -294,6 +338,7 @@ export const useAppStore = create<AppState & AppActions>()(
         kids: state.kids,
         foods: state.foods,
         menus: state.menus,
+        standards: state.standards,
       }),
       skipHydration: true,
     },
