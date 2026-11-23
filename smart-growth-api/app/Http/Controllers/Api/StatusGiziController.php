@@ -79,16 +79,8 @@ class StatusGiziController extends Controller
         $idAnak = is_numeric($id) ? $id : (int) str_replace('kid-', '', $id);
         $anak = Anak::findOrFail($idAnak);
 
-        // Find reference standard
-        $standard = StandardGizi::where('jenis_kelamin', $anak->jenis_kelamin)
-            ->where('usia_bulan', '<=', $anak->usia_bulan)
-            ->orderByDesc('usia_bulan')
-            ->first();
-
-        if (!$standard) {
-            $standard = StandardGizi::where('jenis_kelamin', $anak->jenis_kelamin)->first();
-        }
-
+        // Find reference standard -> Anak::findStandard() & hitungZScoreDanStatus()
+        $standard = $anak->findStandard();
         $meanTinggi = $standard ? (float) $standard->mean_tinggi : 110.0;
         $sdTinggi = $standard ? (float) $standard->sd_tinggi : 4.5;
 
