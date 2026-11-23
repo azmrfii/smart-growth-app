@@ -38,35 +38,23 @@ class Anak extends Model
         return $this->hasMany(StatusGizi::class, 'id_anak', 'id_anak')->orderByDesc('tanggal_pengukuran');
     }
 
-    /**
-     * Calculate WHO Z-Score (TB/U) and classify status based on standard reference.
-     */
-    public function calculateAndSetStatusGizi(): string
+    public function findStandard(): ?StandardGizi
     {
-        // Find matching standard gizi by age in months (or nearest) and gender
         $standard = StandardGizi::where('jenis_kelamin', $this->jenis_kelamin)
             ->where('usia_bulan', '<=', $this->usia_bulan)
             ->orderByDesc('usia_bulan')
             ->first();
 
-        if (!$standard) {
-            $standard = StandardGizi::where('jenis_kelamin', $this->jenis_kelamin)->first();
-        }
+        return $standard ?: StandardGizi::where('jenis_kelamin', $this->jenis_kelamin)->first();
+    }
 
-        if ($standard && $standard->sd_tinggi > 0) {
-            // Z-Score = (Height - Median) / SD
-            $zScore = ($this->tinggi_badan - $standard->mean_tinggi) / $standard->sd_tinggi;
-        } else {
-            // Fallback estimation
-            $zScore = 0.0;
-        }
+    public function hitungZScoreDanStatus(): array
+    {
+        $standard = $this->findStandard();
+        $zScore = ($standard && $standard->sd_tinggi > 0)
+            ? ($this->tinggi_badan - $standard->mean_tinggi) / $standard->sd_tinggi
+            : 0.0;
 
-        // Classification based on WHO Anthro Z-Score:
-        // Z < -3 SD: Gizi Buruk
-        // -3 SD <= Z < -2 SD: Gizi Kurang
-        // -2 SD <= Z <= +2 SD: Gizi Baik
-        // +2 SD < Z <= +3 SD: Gizi Lebih
-        // Z > +3 SD: Obesitas
         if ($zScore < -3.0) {
             $status = 'Gizi Buruk';
         } elseif ($zScore < -2.0) {
@@ -79,10 +67,16 @@ class Anak extends Model
             $status = 'Obesitas';
         }
 
+        return [$zScore, $status];
+    }
+
+    public function calculateAndSetStatusGizi(): string
+    {
+        [$zScore, $status] = $this->hitungZScoreDanStatus();
+
         $this->status_gizi = $status;
         $this->save();
 
-        // Also record to status_gizi history table
         StatusGizi::create([
             'id_anak' => $this->id_anak,
             'tanggal_pengukuran' => now(),
@@ -97,9 +91,65 @@ class Anak extends Model
         return $status;
     }
 
+    public static function recalculateAllStatusGizi(): int
+    {
+        $changed = 0;
+        foreach (self::all() as $anak) {
+            [, $status] = $anak->hitungZScoreDanStatus();
+            if ($anak->status_gizi !== $status) {
+                $anak->status_gizi = $status;
+                $anak->save();
+                $changed++;
+            }
+        }
+
+        return $changed;
+    }
+
+    public static function getAllAnak()
+    {
+        return self::orderBy('nama')->get();
+    }
+
+    public static function anakList()
+    {
+        return self::getAllAnak();
+    }
+
+    public static function filterAnak(string $nama)
+    {
+        return self::where('nama', 'like', "%{$nama}%")->orderBy('nama')->get();
+    }
+
+    public static function getAnak($idAnak): ?self
+    {
+        return self::find($idAnak);
+    }
+
+    public static function tambahAnak(array $data): self
+    {
+        $anak = self::create($data);
+        $anak->calculateAndSetStatusGizi();
+
+        return $anak;
+    }
+
+    public static function editAnak($idAnak, array $data): self
+    {
+        $anak = self::findOrFail($idAnak);
+        $anak->fill($data)->save();
+        $anak->calculateAndSetStatusGizi();
+
+        return $anak;
+    }
+
+    public static function deleteAnak($idAnak): bool
+    {
+        return (bool) self::findOrFail($idAnak)->delete();
+    }
+
     public function heightInMeters(): float
     {
         return $this->tinggi_badan / 100.0;
     }
 }
-
