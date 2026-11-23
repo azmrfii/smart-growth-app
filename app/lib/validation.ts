@@ -156,7 +156,7 @@ export type KidFormInput = {
   heightCm: string;
   weightKg: string;
   alergi: string;
-  status: string;
+  status?: string;
 };
 
 export function validateKidForm(
