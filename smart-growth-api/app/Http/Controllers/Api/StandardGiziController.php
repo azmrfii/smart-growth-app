@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Anak;
 use App\Models\AuditLog;
 use App\Models\StandardGizi;
 use Illuminate\Http\JsonResponse;
@@ -55,7 +56,7 @@ class StandardGiziController extends Controller
     }
 
     /**
-     * Update standard threshold (Super Admin only, FR-03)
+     * Update standard threshold (Ahli Gizi only, FR-03)
      */
     public function update(Request $request, $id): JsonResponse
     {
@@ -77,9 +78,12 @@ class StandardGiziController extends Controller
 
         $standard->update($validated);
 
+        // Status gizi seluruh anak dihitung ulang otomatis (FR-03 -> FR-04).
+        $recalculated = Anak::recalculateAllStatusGizi();
+
         AuditLog::record(
             'UPDATE_STANDARD_GIZI',
-            "Memperbarui parameter standar gizi ID {$id} ({$standard->usia_tahun} tahun - {$standard->jenis_kelamin})",
+            "Memperbarui parameter standar gizi ID {$id} ({$standard->usia_tahun} tahun - {$standard->jenis_kelamin}); {$recalculated} status anak dihitung ulang",
             $request->user()
         );
 
