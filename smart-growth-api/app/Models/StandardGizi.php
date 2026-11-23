@@ -36,5 +36,21 @@ class StandardGizi extends Model
         'kebutuhan_karbohidrat' => 'integer',
         'kebutuhan_lemak' => 'integer',
     ];
-}
 
+    public static function getStandarGizi()
+    {
+        return self::orderBy('usia_tahun')->orderBy('jenis_kelamin')->get();
+    }
+
+    public static function checkStandard(Anak $anak): ?self
+    {
+        return $anak->findStandard();
+    }
+
+    public static function hitungStandardGizi(Anak $anak): float
+    {
+        [$zScore] = $anak->hitungZScoreDanStatus();
+
+        return round($zScore, 2);
+    }
+}
