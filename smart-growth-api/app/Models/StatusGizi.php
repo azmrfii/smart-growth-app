@@ -40,5 +40,9 @@ class StatusGizi extends Model
     {
         return $this->belongsTo(Anak::class, 'id_anak', 'id_anak');
     }
-}
 
+    public static function calculateStatusGizi(Anak $anak): array
+    {
+        return $anak->hitungZScoreDanStatus();
+    }
+}
