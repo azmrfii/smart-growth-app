@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { ConfirmDialog, Modal } from "@/components/app-shell/Modal";
 import { GENDERS, useAppStore, type Gender, type Kid, type KidInput } from "@/lib/nutrition-store";
-import { NUTRITION_STATUSES, type NutritionStatus } from "@/lib/nutrition-status";
+import { calculateStatusGizi, type NutritionStatus } from "@/lib/nutrition-status";
 import { SmartGrowthAPI } from "@/lib/api-client";
 import { FieldError, fieldProps } from "@/components/app-shell/FieldError";
 import {
@@ -29,7 +29,6 @@ const STATUS_BADGE_CLASSES: Record<NutritionStatus, string> = {
   "Gizi Buruk": "bg-[#5B7C99] text-white",
   "Gizi Kurang": "bg-[#F59E0B] text-white",
   "Gizi Baik": "bg-[#008A2E] text-white",
-  "Berisiko Gizi Lebih": "bg-[#0284C7] text-white",
   "Gizi Lebih": "bg-[#0284C7] text-white",
   Obesitas: "bg-[#851E28] text-white",
 };
@@ -41,7 +40,6 @@ type FormState = {
   ageDisplay: string;
   heightCm: string;
   weightKg: string;
-  status: NutritionStatus;
   alergi: string;
 };
 
@@ -52,7 +50,6 @@ const EMPTY_FORM: FormState = {
   ageDisplay: "5th 6bln",
   heightCm: "100",
   weightKg: "15",
-  status: "Gizi Baik",
   alergi: "-",
 };
 
@@ -66,6 +63,7 @@ export default function DataAnakRoute() {
   const deleteKid = useAppStore((state) => state.deleteKid);
   const resetKidsData = useAppStore((state) => state.resetKidsData);
   const notify = useAppStore((state) => state.notify);
+  const standards = useAppStore((state) => state.standards);
 
   const [query, setQuery] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -75,6 +73,7 @@ export default function DataAnakRoute() {
   const [serverError, setServerError] = useState("");
   const [saving, setSaving] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [detailKid, setDetailKid] = useState<Kid | null>(null);
 
   useEffect(() => {
     SmartGrowthAPI.getKids().then((res) => {
@@ -102,14 +101,14 @@ export default function DataAnakRoute() {
     setErrors((current) => (current[key as KidFields] ? { ...current, [key]: undefined } : current));
   };
 
-  const openAddForm = () => {
+  const pilihTambahAnak = () => {
     setEditingKid(null);
     setForm(EMPTY_FORM);
     setErrors({});
     setShowForm(true);
   };
 
-  const openEditForm = (kid: Kid) => {
+  const pilihEditAnak = (kid: Kid) => {
     setEditingKid(kid);
     setForm({
       name: kid.name,
@@ -118,12 +117,25 @@ export default function DataAnakRoute() {
       ageDisplay: kid.ageDisplay || `${kid.ageYears}th`,
       heightCm: String(kid.heightCm),
       weightKg: String(kid.weightKg),
-      status: kid.status,
       alergi: kid.alergi || "-",
     });
     setErrors({});
     setShowForm(true);
   };
+
+  const pilihHapusAnak = (idAnak: string) => setPendingDeleteId(idAnak);
+  const cariAnak = (search: string) => setQuery(search);
+
+  const statusPreview = useMemo(() => {
+    const h = parseNumber(form.heightCm);
+    const w = parseNumber(form.weightKg);
+    const age = parseAge(form.ageDisplay);
+    if (typeof h !== "number" || typeof w !== "number" || !age || typeof age === "string") return null;
+    return calculateStatusGizi(
+      { gender: form.gender, ageDisplay: form.ageDisplay, heightCm: h, weightKg: w },
+      standards,
+    );
+  }, [form.heightCm, form.weightKg, form.ageDisplay, form.gender, standards]);
 
   const closeForm = () => {
     setShowForm(false);
@@ -132,11 +144,11 @@ export default function DataAnakRoute() {
     setErrors({});
   };
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  const simpanAnak = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (saving) return;
     setServerError("");
-    const found = validateKidForm(form, { genders: GENDERS, statuses: NUTRITION_STATUSES });
+    const found = validateKidForm(form, { genders: GENDERS, statuses: [] });
     setErrors(found);
     if (hasErrors(found)) return;
 
@@ -152,12 +164,9 @@ export default function DataAnakRoute() {
       ageDisplay: form.ageDisplay.trim(),
       heightCm,
       weightKg,
-      status: form.status,
       alergi: form.alergi.trim() || "-",
     };
 
-    // Simpan ke server dulu; data lokal hanya diubah bila server menerima
-    // (atau server offline -> mode demo lokal).
     setSaving(true);
     const res = editingKid
       ? await SmartGrowthAPI.updateKid(editingKid.id, kidData)
@@ -190,6 +199,9 @@ export default function DataAnakRoute() {
     closeForm();
   };
 
+  const klikTambahAnak = simpanAnak;
+  const klikEditAnak = simpanAnak;
+
   return (
     <>
       <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -213,7 +225,7 @@ export default function DataAnakRoute() {
           </button>
           <button
             type="button"
-            onClick={openAddForm}
+            onClick={pilihTambahAnak}
             className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[#0891B2] px-4 text-sm font-semibold text-white shadow-xs transition hover:bg-[#0E7490]"
           >
             <IconPlus size={16} stroke={2.5} />
@@ -239,7 +251,7 @@ export default function DataAnakRoute() {
                 type="search"
                 maxLength={100}
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => cariAnak(event.target.value)}
                 placeholder="Cari nama"
                 aria-label="Cari nama anak"
                 className="h-10 w-64 rounded-lg bg-[#F3F3F5] pr-3 pl-9 text-sm text-[#0A0A0A] outline-none placeholder:text-[#717182] focus:ring-2 focus:ring-[#0891B2]/40"
@@ -278,7 +290,11 @@ export default function DataAnakRoute() {
 
                 return (
                   <tr key={kid.id} className="hover:bg-[#F9FAFB]/80 transition-colors">
-                    <td className="px-4 py-3.5 font-medium text-[#0A0A0A]">{kid.name}</td>
+                    <td className="px-4 py-3.5 font-medium text-[#0A0A0A]">
+                      <button type="button" onClick={() => setDetailKid(kid)} className="text-left hover:text-[#0891B2] hover:underline">
+                        {kid.name}
+                      </button>
+                    </td>
                     <td className="px-4 py-3.5 text-[#4A5565]">{kid.classLabel}</td>
                     <td className="px-4 py-3.5 text-[#4A5565]">{kid.gender}</td>
                     <td className="px-4 py-3.5 text-[#4A5565]">
@@ -312,7 +328,7 @@ export default function DataAnakRoute() {
                       <div className="flex items-center justify-end gap-1.5">
                         <button
                           type="button"
-                          onClick={() => openEditForm(kid)}
+                          onClick={() => pilihEditAnak(kid)}
                           aria-label={`Edit ${kid.name}`}
                           className="flex size-8 items-center justify-center rounded-lg text-[#4A5565] hover:bg-slate-100 hover:text-[#0A0A0A] transition-colors"
                         >
@@ -320,7 +336,7 @@ export default function DataAnakRoute() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => setPendingDeleteId(kid.id)}
+                          onClick={() => pilihHapusAnak(kid.id)}
                           aria-label={`Hapus data ${kid.name}`}
                           className="flex size-8 items-center justify-center rounded-lg text-[#E7000B] hover:bg-[#FFE2E2] transition-colors"
                         >
@@ -349,7 +365,7 @@ export default function DataAnakRoute() {
           description="Isi data anak dan informasi alergi sesuai hasil pengukuran terbaru"
           onClose={closeForm}
         >
-          <form onSubmit={handleSubmit} noValidate className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <form onSubmit={editingKid ? klikEditAnak : klikTambahAnak} noValidate className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <label className="flex flex-col gap-1.5 sm:col-span-2">
               <span className="text-xs font-bold text-[#1E1E1E]">Nama Lengkap</span>
               <input
@@ -486,21 +502,19 @@ export default function DataAnakRoute() {
               <FieldError id="kid-weight-error" message={errors.weightKg} />
             </label>
 
-            <label className="flex flex-col gap-1.5 sm:col-span-2">
-              <span className="text-xs font-bold text-[#1E1E1E]">Status Gizi</span>
-              <select
-                className={inputClass}
-                {...fieldProps("kid-status", errors.status)}
-                value={form.status}
-                onChange={(event) => updateField("status", event.target.value as NutritionStatus)}
-              >
-                {NUTRITION_STATUSES.map((status) => (
-                  <option key={status} value={status}>
-                    {status}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="flex flex-col gap-1.5 rounded-lg border border-dashed border-[#0891B2]/40 bg-cyan-50/40 p-3 sm:col-span-2">
+              <span className="text-xs font-bold text-[#1E1E1E]">Status Gizi (dihitung otomatis)</span>
+              {statusPreview ? (
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className={`rounded-full px-3 py-0.5 text-xs font-semibold ${STATUS_BADGE_CLASSES[statusPreview.status]}`}>
+                    {statusPreview.status}
+                  </span>
+                  <span className="text-[#4A5565]">Z-Score TB/U: {statusPreview.zScore.toFixed(2)} | IMT: {statusPreview.bmi}</span>
+                </div>
+              ) : (
+                <span className="text-xs text-[#717182]">Isi usia, TB, dan BB dengan benar untuk melihat status gizi.</span>
+              )}
+            </div>
 
             {hasErrors(errors) ? (
               <p role="alert" className="text-sm font-medium text-[#E7000B] sm:col-span-2">
@@ -530,6 +544,35 @@ export default function DataAnakRoute() {
               </button>
             </div>
           </form>
+        </Modal>
+      ) : null}
+
+      {detailKid ? (
+        <Modal title="Detail Anak" description="Informasi lengkap data anak" widthClass="max-w-[520px]" onClose={() => setDetailKid(null)}>
+          <dl className="grid grid-cols-1 gap-3 rounded-lg bg-[#F9FAFB] p-4 text-sm sm:grid-cols-2">
+            {[
+              ["Nama", detailKid.name],
+              ["Kelas", detailKid.classLabel],
+              ["Jenis Kelamin", detailKid.gender],
+              ["Usia", detailKid.ageDisplay || `${detailKid.ageYears}th`],
+              ["Tinggi Badan", `${detailKid.heightCm} cm`],
+              ["Berat Badan", `${detailKid.weightKg} kg`],
+              ["Alergi", detailKid.alergi || "-"],
+            ].map(([label, value]) => (
+              <div key={label}>
+                <dt className="text-xs text-[#717182]">{label}</dt>
+                <dd className="font-medium text-[#0A0A0A]">{value}</dd>
+              </div>
+            ))}
+            <div>
+              <dt className="text-xs text-[#717182]">Status Gizi (otomatis)</dt>
+              <dd>
+                <span className={`inline-block rounded-full px-3 py-0.5 text-xs font-semibold ${STATUS_BADGE_CLASSES[detailKid.status] || ""}`}>
+                  {detailKid.status}
+                </span>
+              </dd>
+            </div>
+          </dl>
         </Modal>
       ) : null}
 
