@@ -1,47 +1,96 @@
-import { IconDatabase, IconInfoCircle, IconUsers } from "@tabler/icons-react";
-import { useEffect, useState } from "react";
+import { IconDatabase, IconEdit, IconInfoCircle, IconUsers } from "@tabler/icons-react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router";
 
-import { NUTRITION_STANDARDS, NUTRITION_STATUS_STYLES } from "@/lib/nutrition-status";
+import { NUTRITION_STANDARDS, NUTRITION_STATUS_STYLES, type WhoStandardRow } from "@/lib/nutrition-status";
 import { SmartGrowthAPI } from "@/lib/api-client";
+import { Modal } from "@/components/app-shell/Modal";
+import { useAppStore } from "@/lib/nutrition-store";
 
 export function meta() {
   return [{ title: "Standar Gizi - Sistem Gizi" }];
 }
 
-type WhoStandardRow = {
-  usia_bulan: number;
-  usia_tahun: number;
-  jenis_kelamin: string;
-  mean_tinggi: number;
-  sd_tinggi: number;
-};
-
-const DEFAULT_WHO_TABLE: WhoStandardRow[] = [
-  { usia_bulan: 36, usia_tahun: 3, jenis_kelamin: "Laki-laki", mean_tinggi: 96.1, sd_tinggi: 3.7 },
-  { usia_bulan: 36, usia_tahun: 3, jenis_kelamin: "Perempuan", mean_tinggi: 95.1, sd_tinggi: 3.9 },
-  { usia_bulan: 48, usia_tahun: 4, jenis_kelamin: "Laki-laki", mean_tinggi: 103.3, sd_tinggi: 4.1 },
-  { usia_bulan: 48, usia_tahun: 4, jenis_kelamin: "Perempuan", mean_tinggi: 102.7, sd_tinggi: 4.2 },
-  { usia_bulan: 60, usia_tahun: 5, jenis_kelamin: "Laki-laki", mean_tinggi: 110.0, sd_tinggi: 4.3 },
-  { usia_bulan: 60, usia_tahun: 5, jenis_kelamin: "Perempuan", mean_tinggi: 109.4, sd_tinggi: 4.5 },
-  { usia_bulan: 72, usia_tahun: 6, jenis_kelamin: "Laki-laki", mean_tinggi: 116.0, sd_tinggi: 4.6 },
-  { usia_bulan: 72, usia_tahun: 6, jenis_kelamin: "Perempuan", mean_tinggi: 115.5, sd_tinggi: 4.7 },
-  { usia_bulan: 84, usia_tahun: 7, jenis_kelamin: "Laki-laki", mean_tinggi: 122.0, sd_tinggi: 5.0 },
-  { usia_bulan: 84, usia_tahun: 7, jenis_kelamin: "Perempuan", mean_tinggi: 121.8, sd_tinggi: 5.2 },
-];
+const inputClass =
+  "h-10 w-full rounded-lg border border-black/10 bg-white px-3 text-sm text-[#0A0A0A] outline-none focus:border-[#0891B2] aria-[invalid=true]:border-[#E7000B]";
 
 export default function StandarGiziRoute() {
-  const [whoData, setWhoData] = useState<WhoStandardRow[]>(DEFAULT_WHO_TABLE);
+  const whoData = useAppStore((state) => state.standards);
+  const setStandards = useAppStore((state) => state.setStandards);
+  const notify = useAppStore((state) => state.notify);
   const [isFromDb, setIsFromDb] = useState(false);
+
+  const [editing, setEditing] = useState<WhoStandardRow | null>(null);
+  const [mean, setMean] = useState("");
+  const [sd, setSd] = useState("");
+  const [errors, setErrors] = useState<{ mean?: string; sd?: string }>({});
+  const [serverError, setServerError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     SmartGrowthAPI.getStandardGizi().then((res) => {
       if (res && res.success && Array.isArray(res.tableWHO) && res.tableWHO.length > 0) {
-        setWhoData(res.tableWHO);
+        setStandards(
+          res.tableWHO.map((r: any) => ({
+            ...r,
+            mean_tinggi: Number(r.mean_tinggi),
+            sd_tinggi: Number(r.sd_tinggi),
+          })),
+        );
         setIsFromDb(true);
       }
     });
-  }, []);
+  }, [setStandards]);
+
+  const openEdit = (row: WhoStandardRow) => {
+    setEditing(row);
+    setMean(String(row.mean_tinggi));
+    setSd(String(row.sd_tinggi));
+    setErrors({});
+    setServerError("");
+  };
+
+  const simpanStandar = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!editing || saving) return;
+    const meanNum = Number(mean.replace(",", "."));
+    const sdNum = Number(sd.replace(",", "."));
+    const found: { mean?: string; sd?: string } = {};
+    if (!mean.trim() || Number.isNaN(meanNum)) found.mean = "Mean tinggi wajib berupa angka.";
+    else if (meanNum < 30 || meanNum > 200) found.mean = "Mean tinggi harus antara 30 dan 200 cm.";
+    if (!sd.trim() || Number.isNaN(sdNum)) found.sd = "SD wajib berupa angka.";
+    else if (sdNum <= 0 || sdNum > 30) found.sd = "SD harus lebih dari 0 dan maksimal 30 (pembagi Z-Score).";
+    setErrors(found);
+    if (found.mean || found.sd) return;
+
+    setSaving(true);
+    const res =
+      editing.id_standar !== undefined
+        ? await SmartGrowthAPI.updateStandardGizi(editing.id_standar, { mean_tinggi: meanNum, sd_tinggi: sdNum })
+        : null;
+    setSaving(false);
+
+    if (res && !res.ok && res.status !== 0) {
+      setErrors({ mean: res.errors.mean_tinggi, sd: res.errors.sd_tinggi });
+      setServerError(res.errors.mean_tinggi || res.errors.sd_tinggi ? "" : res.message);
+      return;
+    }
+
+    setStandards(
+      whoData.map((r) =>
+        r === editing || (r.id_standar !== undefined && r.id_standar === editing.id_standar)
+          ? { ...r, mean_tinggi: meanNum, sd_tinggi: sdNum }
+          : r,
+      ),
+    );
+    if (res?.ok) {
+      SmartGrowthAPI.getKids().then((k) => {
+        if (k?.success && Array.isArray(k.data) && k.data.length > 0) useAppStore.setState({ kids: k.data });
+      });
+    }
+    notify("Standar Gizi Diperbarui", `Parameter ${editing.usia_tahun} tahun (${editing.jenis_kelamin}) berhasil disimpan`);
+    setEditing(null);
+  };
 
   return (
     <>
@@ -49,7 +98,7 @@ export default function StandarGiziRoute() {
         <div>
           <h1 className="text-2xl font-bold text-[#0A0A0A]">Standar Gizi (Z-Score)</h1>
           <p className="text-sm text-[#4A5565]">
-            Kelola parameter standar gizi berdasarkan WHO untuk usia 3-7 tahun
+            Lihat dan ubah parameter standar gizi berdasarkan WHO untuk usia 3-7 tahun
           </p>
         </div>
         {isFromDb ? (
@@ -68,7 +117,6 @@ export default function StandarGiziRoute() {
         </div>
       </div>
 
-      {/* Kategori Klasifikasi */}
       <section className="flex flex-col gap-4 rounded-[14px] border border-black/10 bg-white p-6 shadow-xs">
         <h2 className="text-base font-bold text-[#0A0A0A]">Kategori Status Gizi Berdasarkan Z-Score</h2>
         <div className="overflow-x-auto rounded-lg border border-black/10">
@@ -97,7 +145,6 @@ export default function StandarGiziRoute() {
         </div>
       </section>
 
-      {/* Tabel Parameter Rujukan WHO (Gambar UI 05.A DPPL) */}
       <section className="flex flex-col gap-4 rounded-[14px] border border-black/10 bg-white p-6 shadow-xs">
         <div>
           <h2 className="text-base font-bold text-[#0A0A0A]">Tabel Standar Gizi WHO (3-7 Tahun)</h2>
@@ -113,6 +160,7 @@ export default function StandarGiziRoute() {
                 <th className="px-4 py-3">JENIS KELAMIN</th>
                 <th className="px-4 py-3">MEAN TINGGI (CM)</th>
                 <th className="px-4 py-3">STANDARD DEVIATION (SD)</th>
+                <th className="px-4 py-3 text-right">AKSI</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-black/5 text-[#0F172A]">
@@ -127,6 +175,16 @@ export default function StandarGiziRoute() {
                   </td>
                   <td className="px-4 py-3 font-bold text-[#0891B2]">{row.mean_tinggi}</td>
                   <td className="px-4 py-3">{row.sd_tinggi}</td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      type="button"
+                      onClick={() => openEdit(row)}
+                      aria-label={`Edit standar ${row.usia_tahun} tahun ${row.jenis_kelamin}`}
+                      className="inline-flex size-8 items-center justify-center rounded-lg text-[#4A5565] transition-colors hover:bg-slate-100 hover:text-[#0A0A0A]"
+                    >
+                      <IconEdit size={16} stroke={1.75} />
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -143,6 +201,39 @@ export default function StandarGiziRoute() {
           </Link>
         </div>
       </section>
+
+      {editing ? (
+        <Modal
+          title="Edit Parameter Standar Gizi"
+          description={`${editing.usia_tahun} tahun (${editing.usia_bulan} bulan) - ${editing.jenis_kelamin}. Status gizi semua anak akan dihitung ulang otomatis.`}
+          widthClass="max-w-[460px]"
+          onClose={() => setEditing(null)}
+        >
+          <form onSubmit={simpanStandar} noValidate className="flex flex-col gap-4">
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-bold text-[#1E1E1E]">Mean Tinggi (cm)</span>
+              <input className={inputClass} inputMode="decimal" value={mean} aria-invalid={Boolean(errors.mean)} onChange={(e) => setMean(e.target.value)} />
+              {errors.mean ? <span className="text-xs text-[#E7000B]">{errors.mean}</span> : null}
+            </label>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-bold text-[#1E1E1E]">Standard Deviation (SD)</span>
+              <input className={inputClass} inputMode="decimal" value={sd} aria-invalid={Boolean(errors.sd)} onChange={(e) => setSd(e.target.value)} />
+              {errors.sd ? <span className="text-xs text-[#E7000B]">{errors.sd}</span> : null}
+            </label>
+            {serverError ? (
+              <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-medium text-[#D4183D]">{serverError}</p>
+            ) : null}
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setEditing(null)} className="h-9 rounded-lg border border-black/10 bg-white px-4 text-sm font-medium text-[#0A0A0A] hover:bg-black/5">
+                Batal
+              </button>
+              <button type="submit" disabled={saving} className="h-9 rounded-lg bg-[#0891B2] px-4 text-sm font-medium text-white hover:bg-[#0E7490] disabled:opacity-70">
+                {saving ? "Menyimpan..." : "Simpan"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      ) : null}
     </>
   );
 }
