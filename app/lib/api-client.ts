@@ -198,6 +198,17 @@ export const SmartGrowthAPI = {
     }>("/standard-gizi");
   },
 
+  // Ubah parameter standar WHO (mean & SD tinggi) - Ahli Gizi. Backend: PUT /standard-gizi/{id}.
+  updateStandardGizi: (idStandar: number, data: { mean_tinggi: number; sd_tinggi: number }) =>
+    apiRequest<{ success: boolean; message?: string; data: any }>(`/standard-gizi/${idStandar}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  // Cek status gizi satu anak. Backend: GET /status-gizi/anak/{id}.
+  getStatusGiziAnak: (kidId: string) =>
+    apiRequest<{ success: boolean; message?: string; data: any }>(`/status-gizi/anak/${encodeURIComponent(kidId)}`), 
+
   // Status Gizi (Ahli Gizi & Admin Dapur)
   getStatusGizi: async () => {
     return await apiFetch<{
