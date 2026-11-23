@@ -28,7 +28,7 @@ Sistem ini dirancang dengan kontrol akses berbasis peran (*Role-Based Access Con
 ### Langkah Instalasi
 ```bash
 # 1. Salin konfigurasi environment
-cp .env.example .env
+cp .env.example .env atau copy .env.example .env
 
 # Pastikan AUTH_DISABLED=true pada .env untuk mode dev lokal
 
