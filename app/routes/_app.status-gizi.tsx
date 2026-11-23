@@ -1,11 +1,14 @@
-import { IconSearch } from "@tabler/icons-react";
+import { IconAlertTriangle, IconHeartRateMonitor, IconSearch } from "@tabler/icons-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { useAppStore } from "@/lib/nutrition-store";
+import { Modal } from "@/components/app-shell/Modal";
+import { useAppStore, type Kid } from "@/lib/nutrition-store";
 import { SmartGrowthAPI } from "@/lib/api-client";
 import {
   NUTRITION_STATUS_STYLES,
   NUTRITION_STATUSES,
+  calculateStatusGizi,
+  STATUS_INTERPRETATION,
   type NutritionStatus,
 } from "@/lib/nutrition-status";
 
@@ -22,6 +25,35 @@ export default function StatusGiziRoute() {
   const kids = useAppStore((state) => state.kids);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("Semua");
+  const currentUser = useAppStore((state) => state.currentUser);
+  const standards = useAppStore((state) => state.standards);
+  const canCheck = currentUser?.role === "Ahli Gizi";
+  const [checking, setChecking] = useState(false);
+  const [checkError, setCheckError] = useState("");
+  const [checkResult, setCheckResult] = useState<{
+    kid: Kid;
+    zScore: number;
+    status: NutritionStatus;
+    bmi: number;
+    interpretation: string;
+  } | null>(null);
+
+  const pilihAnakForCheckGizi = async (kid: Kid) => {
+    if (checking) return;
+    setChecking(true);
+    setCheckError("");
+    const res = await SmartGrowthAPI.getStatusGiziAnak(kid.id);
+    setChecking(false);
+    if (res.ok) {
+      const d = res.data.data;
+      setCheckResult({ kid, zScore: d.zScore, status: d.status, bmi: d.bmi, interpretation: d.interpretation });
+    } else if (res.status === 0) {
+      const r = calculateStatusGizi(kid, standards);
+      setCheckResult({ kid, zScore: r.zScore, status: r.status, bmi: r.bmi, interpretation: r.interpretation });
+    } else {
+      setCheckError(res.message);
+    }
+  };
 
   useEffect(() => {
     SmartGrowthAPI.getKids().then((res) => {
@@ -129,6 +161,8 @@ export default function StatusGiziRoute() {
                 <th className="px-4 py-3 font-normal">BB (kg)</th>
                 <th className="px-4 py-3 font-normal">IMT (kg/m²)</th>
                 <th className="px-4 py-3 font-normal">Status Gizi</th>
+                <th className="px-4 py-3 font-normal">Alergi</th>
+                {canCheck ? <th className="px-4 py-3 text-right font-normal">Detail</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -144,11 +178,34 @@ export default function StatusGiziRoute() {
                       {kid.status}
                     </span>
                   </td>
+                  <td className="px-4 py-3">
+                    {kid.alergi && kid.alergi !== "-" ? (
+                      <span title={kid.alergi} className="inline-flex items-center gap-1 rounded-full bg-[#D4183D] px-2.5 py-0.5 text-xs font-semibold text-white">
+                        <IconAlertTriangle size={12} stroke={2.5} />
+                        {kid.alergi.split(/[,/]/).filter(Boolean).length} alergi
+                      </span>
+                    ) : (
+                      <span className="text-[#717182]">-</span>
+                    )}
+                  </td>
+                  {canCheck ? (
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() => pilihAnakForCheckGizi(kid)}
+                        disabled={checking}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#0891B2] px-3 text-xs font-semibold text-white hover:bg-[#0E7490] disabled:opacity-60"
+                      >
+                        <IconHeartRateMonitor size={14} stroke={2} />
+                        Cek
+                      </button>
+                    </td>
+                  ) : null}
                 </tr>
               ))}
               {visibleKids.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-[#717182]">
+                  <td colSpan={canCheck ? 8 : 7} className="px-4 py-8 text-center text-[#717182]">
                     Tidak ada anak dengan kriteria tersebut.
                   </td>
                 </tr>
@@ -157,6 +214,66 @@ export default function StatusGiziRoute() {
           </table>
         </div>
       </section>
+
+      {checking ? (
+        <div role="status" className="fixed inset-0 z-[70] flex flex-col items-center justify-center gap-3 bg-white/40 backdrop-blur-sm">
+          <span className="size-10 animate-spin rounded-full border-4 border-[#0891B2]/25 border-t-[#0891B2]" />
+          <span className="text-sm font-semibold text-[#0E7490]">Menghitung status gizi...</span>
+        </div>
+      ) : null}
+
+      {checkError ? (
+        <Modal title="Gagal Menghitung Status Gizi" description={checkError} widthClass="max-w-[420px]" onClose={() => setCheckError("")}>
+          <div className="flex justify-end">
+            <button type="button" onClick={() => setCheckError("")} className="h-9 rounded-lg border border-black/10 px-4 text-sm hover:bg-black/5">Tutup</button>
+          </div>
+        </Modal>
+      ) : null}
+
+      {checkResult ? (
+        <Modal
+          title="Cek Status Gizi Anak"
+          description="Z-Score dan status gizi berdasarkan data fisik anak (WHO Standards 3-7 tahun)"
+          widthClass="max-w-[620px]"
+          onClose={() => setCheckResult(null)}
+        >
+          <div className="flex flex-col gap-4">
+            <dl className="grid grid-cols-2 gap-3 rounded-lg bg-[#F9FAFB] p-4 text-sm">
+              {[
+                ["Nama", checkResult.kid.name],
+                ["Kelas", checkResult.kid.classLabel],
+                ["Jenis Kelamin", checkResult.kid.gender],
+                ["Usia", checkResult.kid.ageDisplay || `${checkResult.kid.ageYears}th`],
+                ["Tinggi Badan", `${checkResult.kid.heightCm} cm`],
+                ["Berat Badan", `${checkResult.kid.weightKg} kg`],
+                ["Alergi", checkResult.kid.alergi || "-"],
+                ["BMI", String(checkResult.bmi)],
+              ].map(([label, value]) => (
+                <div key={label}>
+                  <dt className="text-xs text-[#717182]">{label}</dt>
+                  <dd className="font-medium text-[#0A0A0A]">{value}</dd>
+                </div>
+              ))}
+            </dl>
+            <div className={`flex items-center justify-between rounded-lg border p-4 ${NUTRITION_STATUS_STYLES[checkResult.status].card}`}>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-[#4A5565]">Status Gizi</span>
+                <span className={`w-fit rounded-lg px-3 py-1 text-sm font-semibold ${NUTRITION_STATUS_STYLES[checkResult.status].badge}`}>
+                  {checkResult.status}
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="text-xs text-[#4A5565]">Z-Score (TB/U)</span>
+                <p className="text-2xl font-bold text-[#0A0A0A]">{checkResult.zScore.toFixed(2)}</p>
+              </div>
+            </div>
+            <p className="rounded-lg border border-black/10 p-3 text-xs text-[#4A5565]">
+              <span className="font-semibold">Interpretasi: </span>
+              {checkResult.interpretation || STATUS_INTERPRETATION[checkResult.status]}
+            </p>
+          </div>
+        </Modal>
+      ) : null}
     </>
   );
 }
